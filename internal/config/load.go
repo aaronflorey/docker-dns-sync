@@ -22,13 +22,14 @@ func Load(path string) (Config, error) {
 		return Config{}, fmt.Errorf("decode config file: %w", err)
 	}
 
-	if len(cfg.Sources) == 0 {
-		return Config{}, errors.New("at least one source must be configured")
+	if err := Validate(cfg); err != nil {
+		return Config{}, err
 	}
 
-	if len(cfg.Outputs) == 0 {
-		return Config{}, errors.New("at least one output must be configured")
+	resolved, err := ResolveSecrets(cfg, os.LookupEnv)
+	if err != nil {
+		return Config{}, err
 	}
 
-	return cfg, nil
+	return resolved, nil
 }
