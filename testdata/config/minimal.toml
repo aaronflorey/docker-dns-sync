@@ -1,0 +1,23 @@
+[[sources]]
+type = "docker"
+name = "local-docker"
+endpoint = "unix:///var/run/docker.sock"
+
+[[outputs]]
+type = "adguard"
+name = "primary-adguard"
+url = "http://127.0.0.1:3000"
+username = "admin"
+password_env = "ADGUARD_PASSWORD"
+
+[state]
+path = "./state/ownership.json"
+
+[logging]
+level = "info"
+format = "json"
+
+[retry]
+initial_interval = "1s"
+max_interval = "30s"
+max_elapsed_time = "5m"
