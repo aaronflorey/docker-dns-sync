@@ -37,7 +37,7 @@ Requirements for initial release. Each maps to roadmap phases.
 
 - [ ] **OPS-01**: Operator can observe structured logs for startup reconciliation, event handling, state persistence, output writes, retries, and error conditions.
 - [ ] **OPS-02**: Operator can deploy the daemon as either a host binary or a Docker container using documented first-class deployment paths.
-- [ ] **OPS-03**: Integrator can add a future source or output implementation without changing the reconciler contract.
+- [x] **OPS-03**: Integrator can add a future source or output implementation without changing the reconciler contract.
 
 ## v2 Requirements
 
@@ -91,7 +91,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | STATE-04 | Phase 4 | Pending |
 | OPS-01 | Phase 4 | Pending |
 | OPS-02 | Phase 4 | Pending |
-| OPS-03 | Phase 1 | Pending |
+| OPS-03 | Phase 1 | Complete |
 
 **Coverage:**
 - v1 requirements: 17 total

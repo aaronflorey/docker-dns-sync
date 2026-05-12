@@ -33,7 +33,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 Plans:
 - [x] 01-01-PLAN.md — Bootstrap the Go module, CLI run path, and minimal TOML startup smoke test.
 - [x] 01-02-PLAN.md — Add semantic config validation, secret resolution, and Docker endpoint mode coverage.
-- [ ] 01-03-PLAN.md — Define stable source/output contracts and runtime-owned factories with real Docker endpoint bootstrap.
+- [x] 01-03-PLAN.md — Define stable source/output contracts and runtime-owned factories with real Docker endpoint bootstrap.
 - [ ] 01-04-PLAN.md — Lock the atomic JSON state foundation and wire runtime logging, retry, and startup state initialization.
 
 ### Phase 2: Ownership-Safe Reconciliation Core
@@ -80,7 +80,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Runtime Foundation & Contracts | 2/4 | In Progress|  |
+| 1. Runtime Foundation & Contracts | 3/4 | In Progress|  |
 | 2. Ownership-Safe Reconciliation Core | 0/TBD | Not started | - |
 | 3. Docker/Godoxy Snapshot Automation | 0/TBD | Not started | - |
 | 4. Recovery, Observability & Deployment | 0/TBD | Not started | - |
