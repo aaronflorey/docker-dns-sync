@@ -75,29 +75,29 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| CONF-01 | TBD | Pending |
-| CONF-02 | TBD | Pending |
-| CONF-03 | TBD | Pending |
-| SRC-01 | TBD | Pending |
-| SRC-02 | TBD | Pending |
-| SRC-03 | TBD | Pending |
-| RECON-01 | TBD | Pending |
-| RECON-02 | TBD | Pending |
-| RECON-03 | TBD | Pending |
-| RECON-04 | TBD | Pending |
-| STATE-01 | TBD | Pending |
-| STATE-02 | TBD | Pending |
-| STATE-03 | TBD | Pending |
-| STATE-04 | TBD | Pending |
-| OPS-01 | TBD | Pending |
-| OPS-02 | TBD | Pending |
-| OPS-03 | TBD | Pending |
+| CONF-01 | Phase 1 | Pending |
+| CONF-02 | Phase 1 | Pending |
+| CONF-03 | Phase 1 | Pending |
+| SRC-01 | Phase 3 | Pending |
+| SRC-02 | Phase 3 | Pending |
+| SRC-03 | Phase 3 | Pending |
+| RECON-01 | Phase 3 | Pending |
+| RECON-02 | Phase 2 | Pending |
+| RECON-03 | Phase 2 | Pending |
+| RECON-04 | Phase 2 | Pending |
+| STATE-01 | Phase 4 | Pending |
+| STATE-02 | Phase 2 | Pending |
+| STATE-03 | Phase 4 | Pending |
+| STATE-04 | Phase 4 | Pending |
+| OPS-01 | Phase 4 | Pending |
+| OPS-02 | Phase 4 | Pending |
+| OPS-03 | Phase 1 | Pending |
 
 **Coverage:**
 - v1 requirements: 17 total
-- Mapped to phases: 0
-- Unmapped: 17 ⚠️
+- Mapped to phases: 17
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-05-12*
-*Last updated: 2026-05-12 after initial definition*
+*Last updated: 2026-05-12 after roadmap creation*
