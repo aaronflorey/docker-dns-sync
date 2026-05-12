@@ -9,7 +9,7 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Configuration
 
-- [ ] **CONF-01**: Operator can start the daemon from a TOML configuration file that defines one or more source blocks and one or more output blocks.
+- [x] **CONF-01**: Operator can start the daemon from a TOML configuration file that defines one or more source blocks and one or more output blocks.
 - [ ] **CONF-02**: Operator can configure state file location, log level, retry/backoff behavior, and provider credential references without changing code.
 - [ ] **CONF-03**: Operator can run the daemon against either a local Docker socket or a Docker socket proxy using configuration alone.
 
@@ -75,7 +75,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| CONF-01 | Phase 1 | Pending |
+| CONF-01 | Phase 1 | Complete |
 | CONF-02 | Phase 1 | Pending |
 | CONF-03 | Phase 1 | Pending |
 | SRC-01 | Phase 3 | Pending |

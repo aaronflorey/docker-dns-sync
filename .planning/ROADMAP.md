@@ -29,7 +29,12 @@ Decimal phases appear between their surrounding integers in numeric order.
   2. Operator can change state file location, log level, retry/backoff behavior, credential references, and Docker endpoint selection through configuration alone.
   3. Operator can point the same daemon at either a local Docker socket or a Docker socket proxy without code changes.
   4. Integrator can add a new source or output implementation behind the existing contracts without changing the reconciler contract.
-**Plans**: TBD
+**Plans**: 4
+Plans:
+- [x] 01-01-PLAN.md — Bootstrap the Go module, CLI run path, and minimal TOML startup smoke test.
+- [ ] 01-02-PLAN.md — Add semantic config validation, secret resolution, and Docker endpoint mode coverage.
+- [ ] 01-03-PLAN.md — Define stable source/output contracts and runtime-owned factories with real Docker endpoint bootstrap.
+- [ ] 01-04-PLAN.md — Lock the atomic JSON state foundation and wire runtime logging, retry, and startup state initialization.
 
 ### Phase 2: Ownership-Safe Reconciliation Core
 **Goal**: Operators can trust the daemon to reconcile AdGuard rewrites without touching records it does not own.
@@ -75,7 +80,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Runtime Foundation & Contracts | 0/TBD | Not started | - |
+| 1. Runtime Foundation & Contracts | 1/4 | In Progress|  |
 | 2. Ownership-Safe Reconciliation Core | 0/TBD | Not started | - |
 | 3. Docker/Godoxy Snapshot Automation | 0/TBD | Not started | - |
 | 4. Recovery, Observability & Deployment | 0/TBD | Not started | - |
