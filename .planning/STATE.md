@@ -4,13 +4,13 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Phase 1 replanned into numbered execution plans
-last_updated: "2026-05-12T23:19:04.595Z"
+last_updated: "2026-05-12T23:25:00.000Z"
 last_activity: 2026-05-12
 progress:
   total_phases: 4
   completed_phases: 0
   total_plans: 4
-  completed_plans: 1
+  completed_plans: 2
   percent: 0
 ---
 
@@ -26,17 +26,17 @@ See: .planning/PROJECT.md (updated 2026-05-12)
 ## Current Position
 
 Phase: 01 (runtime-foundation-contracts) — EXECUTING
-Plan: 2 of 4
+Plan: 3 of 4
 Status: Ready to execute
 Last activity: 2026-05-12
 
-Progress: [███░░░░░░░] 25%
+Progress: [█████░░░░░] 50%
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 0
+- Total plans completed: 2
 - Average duration: -
 - Total execution time: 0.0 hours
 
@@ -44,15 +44,16 @@ Progress: [███░░░░░░░] 25%
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| - | - | - | - |
+| 01. Runtime Foundation & Contracts | 2 | 0.4 hrs | 11 min |
 
 **Recent Trend:**
 
-- Last 5 plans: -
+- Last 5 plans: Phase 01 P01, Phase 01 P02
 - Trend: Stable
 
 *Updated after each plan completion*
 | Phase 01 P01 | 12 min | 2 tasks | 10 files |
+| Phase 01 P02 | 10 min | 2 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -66,6 +67,8 @@ Recent decisions affecting current work:
 - [Phase 3]: Derive desired state from Docker/Godoxy labels before adding runtime recovery work.
 - [Phase 01]: Use runWithContext for cancellation-controlled tests — Keep signal-based run() for production while tests cancel via context
 - [Phase 01]: Require 1+ source and 1+ output blocks in config.Load — Fail bootstrap before runtime starts on semantically unusable TOML
+- [Phase 01]: Require exactly one of output password/password_ref — Keep credential sourcing explicit and validation-enforced
+- [Phase 01]: Resolve `ENV:` secret refs during config load into a copied runtime config — Avoid leaking unresolved refs or mutating caller-owned slices
 
 ### Pending Todos
 

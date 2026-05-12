@@ -19,7 +19,8 @@ type OutputConfig struct {
 	Name        string `toml:"name"`
 	URL         string `toml:"url"`
 	Username    string `toml:"username"`
-	PasswordEnv string `toml:"password_env"`
+	Password    string `toml:"password"`
+	PasswordRef string `toml:"password_ref"`
 }
 
 type StateConfig struct {
