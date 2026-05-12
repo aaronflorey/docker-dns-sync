@@ -13,6 +13,14 @@ import (
 	"github.com/aaronlmathis/docker-dns-sync/internal/runtime"
 )
 
+type appRunner interface {
+	Run(context.Context) error
+}
+
+var newApp = func(cfg config.Config) appRunner {
+	return runtime.New(cfg)
+}
+
 func main() {
 	if err := run(os.Args[1:]); err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -44,6 +52,6 @@ func runWithContext(ctx context.Context, args []string) error {
 		return err
 	}
 
-	app := runtime.New(cfg)
+	app := newApp(cfg)
 	return app.Run(ctx)
 }

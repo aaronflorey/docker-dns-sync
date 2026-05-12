@@ -14,13 +14,13 @@ func TestFactoryRegistryExtensibility(t *testing.T) {
 	t.Parallel()
 
 	registry := NewFactoryRegistry()
-	if err := registry.RegisterSource("fake-source", func(cfg config.SourceConfig) (contracts.Source, error) {
+	if err := registry.RegisterSource("fake-source", func(cfg config.SourceConfig, _ RuntimeDeps) (contracts.Source, error) {
 		return fakeSource{provider: contracts.ProviderRef{Type: cfg.Type, Name: cfg.Name}}, nil
 	}); err != nil {
 		t.Fatalf("register source: %v", err)
 	}
 
-	if err := registry.RegisterOutput("fake-output", func(cfg config.OutputConfig) (contracts.Output, error) {
+	if err := registry.RegisterOutput("fake-output", func(cfg config.OutputConfig, _ RuntimeDeps) (contracts.Output, error) {
 		return fakeOutput{provider: contracts.ProviderRef{Type: cfg.Type, Name: cfg.Name}}, nil
 	}); err != nil {
 		t.Fatalf("register output: %v", err)
@@ -29,7 +29,7 @@ func TestFactoryRegistryExtensibility(t *testing.T) {
 	sources, outputs, err := registry.BuildProviders(config.Config{
 		Sources: []config.SourceConfig{{Type: "fake-source", Name: "source-a", Endpoint: "unix:///var/run/docker.sock"}},
 		Outputs: []config.OutputConfig{{Type: "fake-output", Name: "output-a", URL: "http://127.0.0.1:3000", Username: "admin", Password: "secret"}},
-	})
+	}, RuntimeDeps{})
 	if err != nil {
 		t.Fatalf("build providers: %v", err)
 	}
@@ -47,7 +47,7 @@ func TestBuildProvidersFromConfig(t *testing.T) {
 	t.Parallel()
 
 	registry := NewDefaultFactoryRegistry()
-	sources, outputs, err := registry.BuildProviders(validRuntimeConfig("unix:///var/run/docker.sock"))
+	sources, outputs, err := registry.BuildProviders(validRuntimeConfig("unix:///var/run/docker.sock"), RuntimeDeps{})
 	if err != nil {
 		t.Fatalf("build providers: %v", err)
 	}
@@ -78,7 +78,7 @@ func TestDockerSourceUsesConfiguredEndpoint(t *testing.T) {
 		t.Run(endpoint, func(t *testing.T) {
 			t.Parallel()
 
-			sources, err := registry.BuildSources(validRuntimeConfig(endpoint))
+			sources, err := registry.BuildSources(validRuntimeConfig(endpoint), RuntimeDeps{})
 			if err != nil {
 				t.Fatalf("build sources: %v", err)
 			}

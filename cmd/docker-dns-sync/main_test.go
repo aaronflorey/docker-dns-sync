@@ -2,10 +2,16 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/aaronlmathis/docker-dns-sync/internal/config"
+	"github.com/aaronlmathis/docker-dns-sync/internal/runtime"
 )
 
 func TestRunWithMinimalConfig(t *testing.T) {
@@ -96,7 +102,142 @@ func TestRunBlocksUntilCancelled(t *testing.T) {
 	}
 }
 
+func TestRunInitializesStateStoreAndProviders(t *testing.T) {
+	configPath := tempConfigPath(t, "minimal.toml")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var captured *runtime.App
+	restore := swapNewApp(func(cfg config.Config) appRunner {
+		captured = runtime.New(cfg)
+		return captured
+	})
+	defer restore()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- runWithContext(ctx, []string{"-config", configPath})
+	}()
+
+	waitFor(t, func() bool {
+		return captured != nil && captured.StateStore() != nil && captured.SourceCount() == 1 && captured.OutputCount() == 1
+	})
+
+	if _, err := os.Stat(captured.StateStore().Path()); err != nil {
+		t.Fatalf("expected state file to exist: %v", err)
+	}
+
+	cancel()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("expected clean shutdown, got %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for shutdown")
+	}
+}
+
+func TestRuntimeAppliesLoggingAndRetryConfig(t *testing.T) {
+	configPath := tempConfigPath(t, "minimal.toml")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var captured *runtime.App
+	restore := swapNewApp(func(cfg config.Config) appRunner {
+		captured = runtime.New(cfg)
+		return captured
+	})
+	defer restore()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- runWithContext(ctx, []string{"-config", configPath})
+	}()
+
+	waitFor(t, func() bool {
+		return captured != nil && captured.StateStore() != nil
+	})
+
+	deps := captured.Deps()
+	if deps.LogLevel != slog.LevelInfo {
+		t.Fatalf("expected log level info, got %v", deps.LogLevel)
+	}
+
+	if !deps.Logger.Enabled(context.Background(), slog.LevelInfo) {
+		t.Fatal("expected info level to be enabled")
+	}
+
+	if deps.Logger.Enabled(context.Background(), slog.LevelDebug) {
+		t.Fatal("expected debug level to be disabled for info logger")
+	}
+
+	if deps.Retry.InitialInterval != time.Second {
+		t.Fatalf("expected retry initial interval 1s, got %v", deps.Retry.InitialInterval)
+	}
+
+	if deps.Retry.MaxInterval != 30*time.Second {
+		t.Fatalf("expected retry max interval 30s, got %v", deps.Retry.MaxInterval)
+	}
+
+	if deps.Retry.MaxElapsedTime != 5*time.Minute {
+		t.Fatalf("expected retry max elapsed time 5m, got %v", deps.Retry.MaxElapsedTime)
+	}
+
+	cancel()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("expected clean shutdown, got %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for shutdown")
+	}
+}
+
 func fixturePath(t *testing.T, name string) string {
 	t.Helper()
 	return filepath.Join("..", "..", "testdata", "config", name)
+}
+
+func tempConfigPath(t *testing.T, name string) string {
+	t.Helper()
+
+	payload, err := os.ReadFile(fixturePath(t, name))
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+
+	statePath := filepath.Join(t.TempDir(), "state", "ownership.json")
+	rewritten := strings.ReplaceAll(string(payload), "./state/ownership.json", statePath)
+	path := filepath.Join(t.TempDir(), name)
+	if err := os.WriteFile(path, []byte(rewritten), 0o600); err != nil {
+		t.Fatalf("write temp config: %v", err)
+	}
+
+	return path
+}
+
+func swapNewApp(factory func(config.Config) appRunner) func() {
+	previous := newApp
+	newApp = factory
+	return func() {
+		newApp = previous
+	}
+}
+
+func waitFor(t *testing.T, ready func() bool) {
+	t.Helper()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if ready() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	t.Fatal(fmt.Sprintf("condition was not met before timeout"))
 }

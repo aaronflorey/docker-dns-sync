@@ -22,14 +22,5 @@ func Load(path string) (Config, error) {
 		return Config{}, fmt.Errorf("decode config file: %w", err)
 	}
 
-	if err := Validate(cfg); err != nil {
-		return Config{}, err
-	}
-
-	resolved, err := ResolveSecrets(cfg, os.LookupEnv)
-	if err != nil {
-		return Config{}, err
-	}
-
-	return resolved, nil
+	return cfg, nil
 }
