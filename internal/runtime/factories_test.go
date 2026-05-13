@@ -65,8 +65,8 @@ func TestBuildProvidersFromConfig(t *testing.T) {
 		t.Fatalf("expected docker provider, got %T", sources[0])
 	}
 
-	if _, ok := outputs[0].(*adguardstub.Provider); !ok {
-		t.Fatalf("expected adguard stub provider, got %T", outputs[0])
+	if _, ok := outputs[0].(*adguardprovider.Provider); !ok {
+		t.Fatalf("expected real adguard provider, got %T", outputs[0])
 	}
 }
 
