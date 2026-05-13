@@ -161,11 +161,6 @@ type reconcileFakeOutput struct {
 	deleted  []contracts.VisibleRecord
 }
 
-type reconcileUpdateCall struct {
-	From contracts.VisibleRecord
-	To   contracts.DesiredRecord
-}
-
 func (f *reconcileFakeOutput) Provider() contracts.ProviderRef { return f.provider }
 
 func (f *reconcileFakeOutput) ListVisible(context.Context) ([]contracts.VisibleRecord, error) {
