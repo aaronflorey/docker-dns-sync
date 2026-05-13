@@ -46,7 +46,11 @@ Plans:
   2. Manual or pre-existing AdGuard rewrites that are not represented in daemon state remain unchanged after reconciliation.
   3. The daemon only mutates rewrites it previously created and tracks in local state.
   4. Operator can trace every daemon-managed rewrite in local state back to its source container, generated domains, output identity, and last applied value.
-**Plans**: TBD
+**Plans**: 2
+
+Plans:
+- [ ] 02-01-PLAN.md — Build the runtime reconcile planner/apply slice with ownership-gated tests and state ordering coverage.
+- [ ] 02-02-PLAN.md — Replace the AdGuard stub with a real output provider and runtime factory wiring.
 
 ### Phase 3: Docker/Godoxy Snapshot Automation
 **Goal**: Operators can get the correct desired rewrite set from Docker/Godoxy labels during initial synchronization.
