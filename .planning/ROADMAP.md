@@ -13,7 +13,7 @@ This MVP roadmap delivers a safe Docker-to-AdGuard reconciliation daemon in four
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Runtime Foundation & Contracts** - Config-driven startup, provider wiring, and stable plugin boundaries.
-- [ ] **Phase 2: Ownership-Safe Reconciliation Core** - Persist ownership and safely mutate only daemon-managed AdGuard rewrites.
+- [x] **Phase 2: Ownership-Safe Reconciliation Core** - Persist ownership and safely mutate only daemon-managed AdGuard rewrites. (completed 2026-05-13)
 - [ ] **Phase 3: Docker/Godoxy Snapshot Automation** - Derive desired rewrites from labeled containers and perform startup full sync.
 - [ ] **Phase 4: Recovery, Observability & Deployment** - Keep the daemon correct through restarts, disconnects, outages, and real operator deployment paths.
 
@@ -50,7 +50,7 @@ Plans:
 
 Plans:
 - [x] 02-01-PLAN.md — Build the runtime reconcile planner/apply slice with ownership-gated tests and state ordering coverage.
-- [ ] 02-02-PLAN.md — Replace the AdGuard stub with a real output provider and runtime factory wiring.
+- [x] 02-02-PLAN.md — Replace the AdGuard stub with a real output provider and runtime factory wiring.
 
 ### Phase 3: Docker/Godoxy Snapshot Automation
 **Goal**: Operators can get the correct desired rewrite set from Docker/Godoxy labels during initial synchronization.
@@ -85,6 +85,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Runtime Foundation & Contracts | 4/4 | Complete | 2026-05-12 |
-| 2. Ownership-Safe Reconciliation Core | 1/2 | In Progress|  |
+| 2. Ownership-Safe Reconciliation Core | 2/2 | Complete   | 2026-05-13 |
 | 3. Docker/Godoxy Snapshot Automation | 0/TBD | Not started | - |
 | 4. Recovery, Observability & Deployment | 0/TBD | Not started | - |
