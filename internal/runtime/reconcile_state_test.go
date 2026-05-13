@@ -1,0 +1,145 @@
+package runtime
+
+import (
+	"context"
+	"errors"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/aaronlmathis/docker-dns-sync/internal/contracts"
+	"github.com/aaronlmathis/docker-dns-sync/internal/state"
+)
+
+func TestPersistedManagedRecords(t *testing.T) {
+	t.Parallel()
+
+	provider := contracts.ProviderRef{Type: "adguard", Name: "primary"}
+	source := contracts.SourceObjectRef{Provider: contracts.ProviderRef{Type: "docker", Name: "local"}, ID: "ctr-1", DisplayName: "svc"}
+
+	t.Run("persists only after successful apply", func(t *testing.T) {
+		t.Parallel()
+
+		statePath := filepath.Join(t.TempDir(), "state.json")
+		store, err := state.NewStore(statePath)
+		if err != nil {
+			t.Fatalf("new store: %v", err)
+		}
+
+		fakeOutput := &reconcileFakeOutputFailCreate{
+			provider: provider,
+			err:      errors.New("create failed"),
+		}
+
+		before, err := store.Load()
+		if err != nil {
+			t.Fatalf("load before: %v", err)
+		}
+
+		_, err = ReconcileAndPersist(context.Background(), store, ReconcileInput{
+			Output: fakeOutput,
+			Desired: []contracts.DesiredRecord{{
+				Hostname: "app.local",
+				Answer:   "10.0.0.10",
+				Source:   source,
+			}},
+			Visible: nil,
+			Owned:   before,
+		})
+		if err == nil {
+			t.Fatalf("expected apply error")
+		}
+
+		after, err := store.Load()
+		if err != nil {
+			t.Fatalf("load after: %v", err)
+		}
+		if len(after.ManagedRecords) != len(before.ManagedRecords) {
+			t.Fatalf("expected unchanged snapshot on apply failure")
+		}
+	})
+
+	t.Run("records traceability and last applied from success path", func(t *testing.T) {
+		t.Parallel()
+
+		statePath := filepath.Join(t.TempDir(), "state.json")
+		store, err := state.NewStore(statePath)
+		if err != nil {
+			t.Fatalf("new store: %v", err)
+		}
+
+		now := time.Date(2026, 5, 13, 2, 0, 0, 0, time.UTC)
+		fakeOutput := &reconcileFakeOutput{provider: provider}
+
+		current, err := store.Load()
+		if err != nil {
+			t.Fatalf("load current: %v", err)
+		}
+
+		result, err := ReconcileAndPersist(context.Background(), store, ReconcileInput{
+			Output: fakeOutput,
+			Desired: []contracts.DesiredRecord{{
+				Hostname: "app.local",
+				Answer:   "10.0.0.10",
+				Source:   source,
+			}},
+			Visible: nil,
+			Owned:   current,
+			Now: func() time.Time {
+				return now
+			},
+		})
+		if err != nil {
+			t.Fatalf("reconcile and persist: %v", err)
+		}
+
+		if len(result.Next.ManagedRecords) != 1 {
+			t.Fatalf("expected one managed record, got %d", len(result.Next.ManagedRecords))
+		}
+
+		record := result.Next.ManagedRecords[0]
+		if record.Output != provider {
+			t.Fatalf("unexpected output traceability: %+v", record.Output)
+		}
+		if record.Source != source {
+			t.Fatalf("unexpected source traceability: %+v", record.Source)
+		}
+		if record.Hostname != "app.local" || record.Answer != "10.0.0.10" {
+			t.Fatalf("unexpected managed record fields: %+v", record)
+		}
+		if !record.LastAppliedAt.Equal(now) {
+			t.Fatalf("expected LastAppliedAt=%s got %s", now, record.LastAppliedAt)
+		}
+
+		saved, err := store.Load()
+		if err != nil {
+			t.Fatalf("load saved: %v", err)
+		}
+		if len(saved.ManagedRecords) != 1 {
+			t.Fatalf("expected one persisted record, got %d", len(saved.ManagedRecords))
+		}
+	})
+}
+
+type reconcileFakeOutputFailCreate struct {
+	provider contracts.ProviderRef
+	err      error
+}
+
+func (f *reconcileFakeOutputFailCreate) Provider() contracts.ProviderRef { return f.provider }
+
+func (f *reconcileFakeOutputFailCreate) ListVisible(context.Context) ([]contracts.VisibleRecord, error) {
+	return nil, nil
+}
+
+func (f *reconcileFakeOutputFailCreate) Create(context.Context, contracts.DesiredRecord) error {
+	return f.err
+}
+
+func (f *reconcileFakeOutputFailCreate) Update(context.Context, contracts.VisibleRecord, contracts.DesiredRecord) error {
+	return nil
+}
+
+func (f *reconcileFakeOutputFailCreate) Delete(context.Context, contracts.VisibleRecord) error {
+	return nil
+}
