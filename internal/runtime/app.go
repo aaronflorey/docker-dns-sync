@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 
@@ -58,8 +59,48 @@ func (a *App) Run(ctx context.Context) error {
 	a.outputs = outputs
 
 	deps.Logger.Info("starting docker-dns-sync runtime", "sources", len(sources), "outputs", len(outputs), "state_path", resolved.State.Path)
+	if err := a.startupReconcile(ctx); err != nil {
+		return err
+	}
 	<-ctx.Done()
 	deps.Logger.Info("runtime cancelled", "reason", ctx.Err())
+	return nil
+}
+
+func (a *App) startupReconcile(ctx context.Context) error {
+	owned, err := a.store.Load()
+	if err != nil {
+		return fmt.Errorf("load owned state: %w", err)
+	}
+
+	desired := make([]contracts.DesiredRecord, 0)
+	for i, source := range a.sources {
+		records, err := source.ListDesired(ctx)
+		if err != nil {
+			return fmt.Errorf("list desired records from source %d (%s/%s): %w", i, source.Provider().Type, source.Provider().Name, err)
+		}
+		desired = append(desired, records...)
+	}
+
+	for i, output := range a.outputs {
+		visible, err := output.ListVisible(ctx)
+		if err != nil {
+			return fmt.Errorf("list visible records from output %d (%s/%s): %w", i, output.Provider().Type, output.Provider().Name, err)
+		}
+
+		result, err := ReconcileAndPersist(ctx, a.store, ReconcileInput{
+			Output:  output,
+			Desired: desired,
+			Visible: visible,
+			Owned:   owned,
+		})
+		if err != nil {
+			return fmt.Errorf("startup reconcile output %d (%s/%s): %w", i, output.Provider().Type, output.Provider().Name, err)
+		}
+
+		owned = result.Next
+	}
+
 	return nil
 }
 
