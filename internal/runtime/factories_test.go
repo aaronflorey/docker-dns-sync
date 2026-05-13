@@ -6,6 +6,7 @@ import (
 
 	"github.com/aaronlmathis/docker-dns-sync/internal/config"
 	"github.com/aaronlmathis/docker-dns-sync/internal/contracts"
+	adguardprovider "github.com/aaronlmathis/docker-dns-sync/internal/providers/adguard"
 	adguardstub "github.com/aaronlmathis/docker-dns-sync/internal/providers/adguardstub"
 	dockerprovider "github.com/aaronlmathis/docker-dns-sync/internal/providers/docker"
 )
@@ -66,6 +67,24 @@ func TestBuildProvidersFromConfig(t *testing.T) {
 
 	if _, ok := outputs[0].(*adguardstub.Provider); !ok {
 		t.Fatalf("expected adguard stub provider, got %T", outputs[0])
+	}
+}
+
+func TestFactoryRegistryDefaultAdGuardProviderIsReal(t *testing.T) {
+	t.Parallel()
+
+	registry := NewDefaultFactoryRegistry()
+	_, outputs, err := registry.BuildProviders(validRuntimeConfig("unix:///var/run/docker.sock"), RuntimeDeps{})
+	if err != nil {
+		t.Fatalf("build providers: %v", err)
+	}
+
+	if _, ok := outputs[0].(*adguardprovider.Provider); !ok {
+		t.Fatalf("expected real adguard provider, got %T", outputs[0])
+	}
+
+	if _, ok := outputs[0].(*adguardstub.Provider); ok {
+		t.Fatalf("expected non-stub adguard provider, got %T", outputs[0])
 	}
 }
 
