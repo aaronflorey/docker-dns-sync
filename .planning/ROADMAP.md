@@ -37,7 +37,7 @@ Plans:
 - [x] 01-04-PLAN.md — Lock the atomic JSON state foundation and wire runtime logging, retry, and startup state initialization.
 
 ### Phase 2: Ownership-Safe Reconciliation Core
-**Goal**: Operators can trust the daemon to reconcile AdGuard rewrites without touching records it does not own.
+**Goal**: As a self-hosting operator, I want to have the daemon reconcile AdGuard rewrites without touching records it does not own, so that I can automate local DNS routing without risking my manual records.
 **Mode:** mvp
 **Depends on**: Phase 1
 **Requirements**: RECON-02, RECON-03, RECON-04, STATE-02
