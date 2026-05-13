@@ -22,14 +22,14 @@ Requirements for initial release. Each maps to roadmap phases.
 ### Reconciliation
 
 - [ ] **RECON-01**: Operator can start the daemon and have it perform an initial full reconciliation before relying on live Docker events.
-- [ ] **RECON-02**: Operator can have daemon-managed AdGuard Home rewrites created, updated, and deleted through idempotent item-level operations.
-- [ ] **RECON-03**: Operator can trust the daemon to mutate only rewrites it previously created and tracks in local state.
-- [ ] **RECON-04**: Operator can keep manual or pre-existing AdGuard rewrites untouched when they are not represented in daemon state.
+- [x] **RECON-02**: Operator can have daemon-managed AdGuard Home rewrites created, updated, and deleted through idempotent item-level operations.
+- [x] **RECON-03**: Operator can trust the daemon to mutate only rewrites it previously created and tracks in local state.
+- [x] **RECON-04**: Operator can keep manual or pre-existing AdGuard rewrites untouched when they are not represented in daemon state.
 
 ### State And Recovery
 
 - [ ] **STATE-01**: Operator can restart the daemon or reboot the host and have reconciliation restore the correct managed rewrite set from source and persisted state.
-- [ ] **STATE-02**: Operator can trace every daemon-managed rewrite in local state back to its source container, generated domains, output identity, and last applied value.
+- [x] **STATE-02**: Operator can trace every daemon-managed rewrite in local state back to its source container, generated domains, output identity, and last applied value.
 - [ ] **STATE-03**: Operator can recover from a Docker event stream disconnect because the daemon reconnects and runs reconciliation to repair missed changes.
 - [ ] **STATE-04**: Operator can recover from temporary AdGuard Home outages because the daemon retries and converges when connectivity returns.
 
@@ -82,11 +82,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 | SRC-02 | Phase 3 | Pending |
 | SRC-03 | Phase 3 | Pending |
 | RECON-01 | Phase 3 | Pending |
-| RECON-02 | Phase 2 | Pending |
-| RECON-03 | Phase 2 | Pending |
-| RECON-04 | Phase 2 | Pending |
+| RECON-02 | Phase 2 | Complete |
+| RECON-03 | Phase 2 | Complete |
+| RECON-04 | Phase 2 | Complete |
 | STATE-01 | Phase 4 | Pending |
-| STATE-02 | Phase 2 | Pending |
+| STATE-02 | Phase 2 | Complete |
 | STATE-03 | Phase 4 | Pending |
 | STATE-04 | Phase 4 | Pending |
 | OPS-01 | Phase 4 | Pending |

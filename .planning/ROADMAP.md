@@ -49,7 +49,7 @@ Plans:
 **Plans**: 2
 
 Plans:
-- [ ] 02-01-PLAN.md — Build the runtime reconcile planner/apply slice with ownership-gated tests and state ordering coverage.
+- [x] 02-01-PLAN.md — Build the runtime reconcile planner/apply slice with ownership-gated tests and state ordering coverage.
 - [ ] 02-02-PLAN.md — Replace the AdGuard stub with a real output provider and runtime factory wiring.
 
 ### Phase 3: Docker/Godoxy Snapshot Automation
@@ -85,6 +85,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Runtime Foundation & Contracts | 4/4 | Complete | 2026-05-12 |
-| 2. Ownership-Safe Reconciliation Core | 0/TBD | Not started | - |
+| 2. Ownership-Safe Reconciliation Core | 1/2 | In Progress|  |
 | 3. Docker/Godoxy Snapshot Automation | 0/TBD | Not started | - |
 | 4. Recovery, Observability & Deployment | 0/TBD | Not started | - |
