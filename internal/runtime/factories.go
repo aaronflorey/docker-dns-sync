@@ -7,7 +7,7 @@ import (
 
 	"github.com/aaronlmathis/docker-dns-sync/internal/config"
 	"github.com/aaronlmathis/docker-dns-sync/internal/contracts"
-	adguardstub "github.com/aaronlmathis/docker-dns-sync/internal/providers/adguardstub"
+	adguardprovider "github.com/aaronlmathis/docker-dns-sync/internal/providers/adguard"
 	dockerprovider "github.com/aaronlmathis/docker-dns-sync/internal/providers/docker"
 )
 
@@ -33,7 +33,7 @@ func NewDefaultFactoryRegistry() *FactoryRegistry {
 		return dockerprovider.New(cfg)
 	}))
 	mustRegister(registry.RegisterOutput("adguard", func(cfg config.OutputConfig, _ RuntimeDeps) (contracts.Output, error) {
-		return adguardstub.New(cfg), nil
+		return adguardprovider.New(cfg), nil
 	}))
 	return registry
 }
