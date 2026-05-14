@@ -1,20 +1,19 @@
 [[sources]]
 type = "docker"
 name = "local-docker"
-# Host-oriented local Docker socket example. For container deployment, start from
-# testdata/config/docker-container.toml or testdata/config/socket-proxy.toml instead.
+# Container deployment example using a mounted Docker socket.
 endpoint = "unix:///var/run/docker.sock"
 
 [[outputs]]
 type = "adguard"
 name = "primary-adguard"
-# Host-binary example: AdGuard is reachable on the same machine.
-url = "http://127.0.0.1:3000"
+# Replace with the network-reachable AdGuard URL inside your container network.
+url = "http://adguardhome:3000"
 username = "admin"
 password_ref = "ENV:ADGUARD_PASSWORD"
 
 [state]
-# This path must stay writable by the deployed process.
+# This path must stay writable by the container process.
 path = "/var/lib/docker-dns-sync/state.json"
 
 [logging]

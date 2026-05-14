@@ -1,13 +1,14 @@
 [[sources]]
 type = "docker"
 name = "socket-proxy"
-# TCP socket proxy or remote Docker example.
+# Docker reachable through a TCP socket proxy or remote daemon.
 endpoint = "tcp://docker-socket-proxy:2375"
 
 [[outputs]]
 type = "adguard"
 name = "primary-adguard"
-url = "http://127.0.0.1:3000"
+# Replace with the network-reachable AdGuard URL for your container or remote setup.
+url = "http://adguardhome:3000"
 username = "admin"
 password_ref = "ENV:ADGUARD_PASSWORD"
 

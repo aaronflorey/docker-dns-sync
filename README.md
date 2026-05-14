@@ -17,7 +17,7 @@ The binary contract is:
 docker-dns-sync -config /etc/docker-dns-sync/config.toml
 ```
 
-Start from `testdata/config/example.toml` for a local Docker socket source or `testdata/config/socket-proxy.toml` for a TCP proxy or remote Docker source.
+Start from `testdata/config/example.toml` for a host-binary deployment with a local Docker socket, `testdata/config/docker-container.toml` for a Docker container deployment that mounts `/var/run/docker.sock`, or `testdata/config/socket-proxy.toml` for a TCP proxy or remote Docker source.
 
 Required config sections:
 
@@ -48,7 +48,7 @@ Notes:
 ## Docker Deployment
 
 1. Build the image with `docker build -t docker-dns-sync .`.
-2. Copy `testdata/config/example.toml` to a host path such as `/opt/docker-dns-sync/config.toml` for a local socket deployment, or use `testdata/config/socket-proxy.toml` if the container should reach Docker through a TCP proxy or remote endpoint.
+2. Copy `testdata/config/docker-container.toml` to a host path such as `/opt/docker-dns-sync/config.toml` when mounting `/var/run/docker.sock`, or use `testdata/config/socket-proxy.toml` if the container should reach Docker through a TCP proxy or remote endpoint.
 3. Create a writable host directory for state such as `/opt/docker-dns-sync/state`.
 4. Provide the AdGuard password through an environment variable.
 5. Run the container:
@@ -68,6 +68,7 @@ docker run -d \
 Notes:
 
 - The container image runs as root on purpose so the documented `/var/run/docker.sock` mount works with the default host socket ownership and mode used by Docker installations.
+- `testdata/config/example.toml` is intentionally host-oriented and leaves AdGuard at `127.0.0.1`; do not reuse it unchanged inside the container unless AdGuard is reachable at container-local localhost.
 - Mounting `/var/run/docker.sock` gives the container broad Docker control. If you do not want to grant that access, use a `tcp://...` endpoint such as `testdata/config/socket-proxy.toml` and give the container only the network path to that proxy or remote daemon.
 - If your host uses rootless Docker or a non-standard socket owner, adjust the container user or socket permissions to match that environment before mounting the socket.
 - Keep the state directory persistent across restarts so ownership recovery works.
@@ -76,6 +77,7 @@ Notes:
 ## Example Files
 
 - `testdata/config/example.toml` - env-ref based example config.
+- `testdata/config/docker-container.toml` - env-ref based Docker container config for `/var/run/docker.sock` plus network-reachable AdGuard.
 - `testdata/config/socket-proxy.toml` - env-ref based TCP proxy or remote Docker example config.
 - `deploy/systemd/docker-dns-sync.service` - starting point for host deployment.
 - `Dockerfile` - container build for Docker deployment.

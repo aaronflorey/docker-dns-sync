@@ -11,6 +11,7 @@ type reconcilePlan struct {
 	Creates      []contracts.DesiredRecord
 	Updates      []reconcileUpdateCall
 	Deletes      []reconcileDeleteCall
+	Drops        []state.ManagedRecord
 	Ambiguities  []*ErrVisibleRecordAmbiguous
 	NextManaged  []state.ManagedRecord
 	AppliedIndex map[string]state.ManagedRecord
@@ -57,11 +58,16 @@ func buildReconcilePlan(output contracts.ProviderRef, desired []contracts.Desire
 	for lineage, d := range desiredByLineage {
 		if ownedRecord, ok := ownedByLineage[lineage]; ok {
 			oldKey := visibleRecordKey(ownedRecord.Hostname, ownedRecord.Answer)
+			newKey := visibleRecordKey(d.Hostname, d.Answer)
 			if len(visibleByKey[oldKey]) == 1 && visibleRecordKey(d.Hostname, d.Answer) != oldKey {
 				pl.Updates = append(pl.Updates, reconcileUpdateCall{From: visibleByKey[oldKey][0], To: d})
 				continue
 			}
 			if len(visibleByKey[oldKey]) > 1 {
+				continue
+			}
+			if len(visibleByKey[newKey]) == 0 {
+				pl.Creates = append(pl.Creates, d)
 				continue
 			}
 			pl.NextManaged = append(pl.NextManaged, state.ManagedRecord{Output: output, Source: d.Source, Hostname: d.Hostname, Answer: d.Answer})
@@ -81,7 +87,9 @@ func buildReconcilePlan(output contracts.ProviderRef, desired []contracts.Desire
 		key := visibleRecordKey(m.Hostname, m.Answer)
 		if len(visibleByKey[key]) == 1 {
 			pl.Deletes = append(pl.Deletes, reconcileDeleteCall{Visible: visibleByKey[key][0], Managed: m})
+			continue
 		}
+		pl.Drops = append(pl.Drops, m)
 	}
 
 	sort.Slice(pl.Creates, func(i, j int) bool {
