@@ -35,7 +35,7 @@ None. v1 MVP requirements are complete and validated.
 
 ## Context
 
-The project is a deterministic infrastructure daemon, not an AI system. The immediate problem is manual DNS rewrite management for Godoxy-labeled Docker workloads in AdGuard Home, which leads to stale entries, slow service availability, and fragile recovery after restarts. The completed v1 milestone now covers startup reconciliation, steady-state event handling, recovery from disconnects and restarts, and documented host-binary and Docker deployment paths.
+The project is a deterministic infrastructure daemon, not an AI system. The immediate problem is manual DNS rewrite management for Godoxy-labeled Docker workloads in AdGuard Home, which leads to stale entries, slow service availability, and fragile recovery after restarts. The completed v1 milestone now covers startup reconciliation, steady-state event handling, recovery from disconnects and restarts, documented host-binary and Docker deployment paths, and the audit-backed verification evidence for those capabilities.
 
 The MVP architecture centers on a configuration loader, source plugins, a normalization layer, a reconciler, a local state store, and output plugins. The first source is Docker with direct parsing of Godoxy-compatible `proxy.*` labels, including alias-derived hostnames and exclusion behavior. The first output is AdGuard Home via its HTTP API using item-level rewrite operations.
 
@@ -79,4 +79,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-13 after v1 milestone completion audit*
+*Last updated: 2026-05-14 after v1 milestone completion*
