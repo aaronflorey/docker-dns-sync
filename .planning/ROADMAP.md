@@ -16,6 +16,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 2: Ownership-Safe Reconciliation Core** - Persist ownership and safely mutate only daemon-managed AdGuard rewrites. (completed 2026-05-13)
 - [x] **Phase 3: Docker/Godoxy Snapshot Automation** - Derive desired rewrites from labeled containers and perform startup full sync. (completed 2026-05-13)
 - [x] **Phase 4: Recovery, Observability & Deployment** - Keep the daemon correct through restarts, disconnects, outages, and real operator deployment paths. (completed 2026-05-13)
+- [x] **Phase 5: Audit Closeout** - Close the milestone audit gaps with targeted recovery, documentation, and verification cleanup. (completed 2026-05-14)
 
 ## Phase Details
 
