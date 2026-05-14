@@ -89,7 +89,7 @@ Plans:
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 → 2 → 3 → 4
+Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
@@ -97,3 +97,14 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 | 2. Ownership-Safe Reconciliation Core | 2/2 | Complete   | 2026-05-13 |
 | 3. Docker/Godoxy Snapshot Automation | 2/2 | Complete | 2026-05-13 |
 | 4. Recovery, Observability & Deployment | 3/3 | Complete | 2026-05-13 |
+| 5. Audit Closeout | 1/1 | Complete | 2026-05-14 |
+
+### Phase 5: Audit Closeout
+
+**Goal:** Close the milestone audit gaps by fixing the real restart-recovery defect, correcting the Docker deployment evidence, and adding the missing verification artifacts for Phases 1, 3, and 4.
+**Requirements**: CONF-01, CONF-02, CONF-03, OPS-03, SRC-01, SRC-02, SRC-03, RECON-01, STATE-01, STATE-03, STATE-04, OPS-01, OPS-02
+**Depends on:** Phase 4
+**Plans:** 1 plan
+
+Plans:
+- [x] 05-01-PLAN.md — Close the recovery blocker, align deployment examples, and backfill verification evidence.

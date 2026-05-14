@@ -100,6 +100,75 @@ func TestReconcilePlanApply(t *testing.T) {
 			t.Fatalf("expected 1 delete call, got %d", got)
 		}
 	})
+
+	t.Run("recreate owned records missing from visible state during restart recovery", func(t *testing.T) {
+		t.Parallel()
+
+		fakeOutput := &reconcileFakeOutput{provider: provider}
+		now := time.Date(2026, 5, 14, 1, 0, 0, 0, time.UTC)
+		owned := state.Snapshot{ManagedRecords: []state.ManagedRecord{{
+			Output:   provider,
+			Source:   source,
+			Hostname: "app.local",
+			Answer:   "10.0.0.10",
+		}}}
+
+		result, err := ReconcileOutput(context.Background(), ReconcileInput{
+			Output: fakeOutput,
+			Desired: []contracts.DesiredRecord{{
+				Hostname: "app.local",
+				Answer:   "10.0.0.10",
+				Source:   source,
+			}},
+			Visible: nil,
+			Owned:   owned,
+			Now: func() time.Time {
+				return now
+			},
+		})
+		if err != nil {
+			t.Fatalf("reconcile output: %v", err)
+		}
+
+		if got := len(fakeOutput.created); got != 1 {
+			t.Fatalf("expected 1 recovery create call, got %d", got)
+		}
+		if got := len(result.Next.ManagedRecords); got != 1 {
+			t.Fatalf("expected 1 managed record after recovery create, got %d", got)
+		}
+		if !result.Next.ManagedRecords[0].LastAppliedAt.Equal(now) {
+			t.Fatalf("expected LastAppliedAt %s, got %s", now, result.Next.ManagedRecords[0].LastAppliedAt)
+		}
+	})
+
+	t.Run("drop stale owned state when record is already gone", func(t *testing.T) {
+		t.Parallel()
+
+		fakeOutput := &reconcileFakeOutput{provider: provider}
+		owned := state.Snapshot{ManagedRecords: []state.ManagedRecord{{
+			Output:   provider,
+			Source:   source,
+			Hostname: "gone.local",
+			Answer:   "10.0.0.99",
+		}}}
+
+		result, err := ReconcileOutput(context.Background(), ReconcileInput{
+			Output:  fakeOutput,
+			Desired: nil,
+			Visible: nil,
+			Owned:   owned,
+		})
+		if err != nil {
+			t.Fatalf("reconcile output: %v", err)
+		}
+
+		if got := len(fakeOutput.deleted); got != 0 {
+			t.Fatalf("expected no delete calls when visible rewrite is already gone, got %d", got)
+		}
+		if got := len(result.Next.ManagedRecords); got != 0 {
+			t.Fatalf("expected stale owned state to be dropped, got %d managed records", got)
+		}
+	})
 }
 
 func TestOwnershipBoundary(t *testing.T) {

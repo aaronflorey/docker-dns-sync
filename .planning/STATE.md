@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: complete
-stopped_at: Phase 4 execution completed
-last_updated: "2026-05-13T13:40:00.000Z"
-last_activity: 2026-05-13
+status: completed
+stopped_at: Phase 5 execution completed
+last_updated: "2026-05-14T23:33:00Z"
+last_activity: 2026-05-14
 progress:
-  total_phases: 4
-  completed_phases: 4
-  total_plans: 11
-  completed_plans: 11
+  total_phases: 5
+  completed_phases: 5
+  total_plans: 12
+  completed_plans: 12
   percent: 100
 ---
 
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-12)
 
 **Core value:** Operators get correct local DNS rewrites for eligible Docker workloads automatically, quickly, and safely without breaking manual AdGuard records.
-**Current focus:** Milestone audit closeout for completed Phase 04
+**Current focus:** Milestone audit closeout completed in Phase 05
 
 ## Current Position
 
-Phase: 04 (recovery-observability-deployment) — COMPLETE
-Plan: 3 of 3
+Phase: 05 (audit-closeout) — COMPLETE
+Plan: 1 of 1
 Status: Execution complete
-Last activity: 2026-05-13
+Last activity: 2026-05-14
 
 Progress: [██████████] 100%
 
@@ -36,7 +36,7 @@ Progress: [██████████] 100%
 
 **Velocity:**
 
-- Total plans completed: 11
+- Total plans completed: 12
 - Average duration: -
 - Total execution time: 0.0 hours
 
@@ -48,10 +48,11 @@ Progress: [██████████] 100%
 | 02. Ownership-Safe Reconciliation Core | 2 | - | - |
 | 03. Docker/Godoxy Snapshot Automation | 2 | - | - |
 | 04. Recovery, Observability & Deployment | 3 | - | - |
+| 05. Audit Closeout | 1 | - | - |
 
 **Recent Trend:**
 
-- Last 5 plans: Phase 03 P01, Phase 03 P02, Phase 04 P01, Phase 04 P02, Phase 04 P03
+- Last 5 plans: Phase 03 P02, Phase 04 P01, Phase 04 P02, Phase 04 P03, Phase 05 P01
 - Trend: Stable
 
 *Updated after each plan completion*
@@ -60,8 +61,13 @@ Progress: [██████████] 100%
 | Phase 04 P01 | - | 2 tasks | 5 files |
 | Phase 04 P02 | - | 2 tasks | 4 files |
 | Phase 04 P03 | - | 2 tasks | 4 files |
+| Phase 05 P01 | - | 2 tasks | 10 files |
 
 ## Accumulated Context
+
+### Roadmap Evolution
+
+- Phase 5 added as the milestone audit closeout phase covering missing verification evidence plus the restart-recovery and deployment-doc audit findings.
 
 ### Decisions
 
@@ -89,6 +95,8 @@ Recent decisions affecting current work:
 - [Phase 04]: Keep retry and structured recovery logging in runtime by wrapping outputs instead of moving policy into providers.
 - [Phase 03]: Emit Docker-derived records only when an explicit host override or non-local endpoint host provides a real answer target. — Avoids container-IP rewrites and synthetic localhost defaults while preserving intentional host overrides.
 - [Phase 04]: Ship explicit host-binary and Docker deployment artifacts that use the real `-config` CLI contract and env-backed secrets.
+- [Phase 05]: Recreate owned-but-missing visible rewrites during recovery, but drop stale owned state when neither desired nor visible records remain. — Restores restart convergence without widening provider or runtime contracts.
+- [Phase 05]: Treat host-binary and container config examples as separate operator paths. — Prevents the Docker docs from implying that a host-local AdGuard URL works unchanged inside the container.
 
 ### Pending Todos
 
@@ -108,6 +116,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-05-13T13:40:00.000Z
-Stopped at: Phase 4 execution completed
-Resume file: .planning/phases/04-recovery-observability-deployment/04-03-SUMMARY.md
+Last session: 2026-05-14T23:33:00Z
+Stopped at: Phase 5 execution completed
+Resume file: .planning/phases/05-fix-audit-gaps-conf-01-conf-02-conf-03-ops-03-src-01-src-02-/05-01-SUMMARY.md

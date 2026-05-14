@@ -23,6 +23,10 @@ func applyReconcilePlan(ctx context.Context, output contracts.Output, owned stat
 
 	progressed := false
 
+	for _, drop := range plan.Drops {
+		delete(recordsByLineage, managedRecordLineageKey(drop))
+	}
+
 	for _, create := range plan.Creates {
 		if err := output.Create(ctx, create); err != nil {
 			return snapshotWithOutputRecords(otherRecords, recordsByLineage), progressed, fmt.Errorf("create %s: %w", visibleRecordKey(create.Hostname, create.Answer), err)
