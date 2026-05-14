@@ -19,7 +19,8 @@ import (
 func TestRunWithMinimalConfig(t *testing.T) {
 	t.Parallel()
 
-	configPath := tempConfigPath(t, "minimal.toml", newAdGuardServer(t).URL)
+	dockerServer := newDockerServer(t)
+	configPath := tempConfigPath(t, "minimal.toml", dockerServer.URL, newAdGuardServer(t).URL)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -76,7 +77,8 @@ func TestRunRejectsMalformedConfig(t *testing.T) {
 func TestRunBlocksUntilCancelled(t *testing.T) {
 	t.Parallel()
 
-	configPath := tempConfigPath(t, "minimal.toml", newAdGuardServer(t).URL)
+	dockerServer := newDockerServer(t)
+	configPath := tempConfigPath(t, "minimal.toml", dockerServer.URL, newAdGuardServer(t).URL)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan error, 1)
@@ -105,7 +107,8 @@ func TestRunBlocksUntilCancelled(t *testing.T) {
 }
 
 func TestRunInitializesStateStoreAndProviders(t *testing.T) {
-	configPath := tempConfigPath(t, "minimal.toml", newAdGuardServer(t).URL)
+	dockerServer := newDockerServer(t)
+	configPath := tempConfigPath(t, "minimal.toml", dockerServer.URL, newAdGuardServer(t).URL)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -142,7 +145,8 @@ func TestRunInitializesStateStoreAndProviders(t *testing.T) {
 }
 
 func TestRuntimeAppliesLoggingAndRetryConfig(t *testing.T) {
-	configPath := tempConfigPath(t, "minimal.toml", newAdGuardServer(t).URL)
+	dockerServer := newDockerServer(t)
+	configPath := tempConfigPath(t, "minimal.toml", dockerServer.URL, newAdGuardServer(t).URL)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -204,7 +208,7 @@ func fixturePath(t *testing.T, name string) string {
 	return filepath.Join("..", "..", "testdata", "config", name)
 }
 
-func tempConfigPath(t *testing.T, name string, adguardURL string) string {
+func tempConfigPath(t *testing.T, name string, dockerURL string, adguardURL string) string {
 	t.Helper()
 
 	payload, err := os.ReadFile(fixturePath(t, name))
@@ -214,6 +218,7 @@ func tempConfigPath(t *testing.T, name string, adguardURL string) string {
 
 	statePath := filepath.Join(t.TempDir(), "state", "ownership.json")
 	rewritten := strings.ReplaceAll(string(payload), "./state/ownership.json", statePath)
+	rewritten = strings.ReplaceAll(rewritten, "unix:///var/run/docker.sock", strings.Replace(dockerURL, "http://", "tcp://", 1))
 	rewritten = strings.ReplaceAll(rewritten, "http://127.0.0.1:3000", adguardURL)
 	path := filepath.Join(t.TempDir(), name)
 	if err := os.WriteFile(path, []byte(rewritten), 0o600); err != nil {
@@ -221,6 +226,22 @@ func tempConfigPath(t *testing.T, name string, adguardURL string) string {
 	}
 
 	return path
+}
+
+func newDockerServer(t *testing.T) *httptest.Server {
+	t.Helper()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/containers/json") || r.Method != http.MethodGet {
+			http.NotFound(w, r)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte("[]"))
+	}))
+	t.Cleanup(server.Close)
+	return server
 }
 
 func newAdGuardServer(t *testing.T) *httptest.Server {

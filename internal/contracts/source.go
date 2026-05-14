@@ -19,7 +19,16 @@ type DesiredRecord struct {
 	Source   SourceObjectRef
 }
 
+type SourceWatch struct {
+	Hints <-chan struct{}
+	Err   <-chan error
+}
+
 type Source interface {
 	Provider() ProviderRef
 	ListDesired(context.Context) ([]DesiredRecord, error)
+}
+
+type WatchableSource interface {
+	Watch(context.Context) SourceWatch
 }

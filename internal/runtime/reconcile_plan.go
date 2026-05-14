@@ -10,10 +10,15 @@ import (
 type reconcilePlan struct {
 	Creates      []contracts.DesiredRecord
 	Updates      []reconcileUpdateCall
-	Deletes      []contracts.VisibleRecord
+	Deletes      []reconcileDeleteCall
 	Ambiguities  []*ErrVisibleRecordAmbiguous
 	NextManaged  []state.ManagedRecord
 	AppliedIndex map[string]state.ManagedRecord
+}
+
+type reconcileDeleteCall struct {
+	Visible contracts.VisibleRecord
+	Managed state.ManagedRecord
 }
 
 func buildReconcilePlan(output contracts.ProviderRef, desired []contracts.DesiredRecord, visible []contracts.VisibleRecord, owned state.Snapshot) reconcilePlan {
@@ -75,13 +80,19 @@ func buildReconcilePlan(output contracts.ProviderRef, desired []contracts.Desire
 		}
 		key := visibleRecordKey(m.Hostname, m.Answer)
 		if len(visibleByKey[key]) == 1 {
-			pl.Deletes = append(pl.Deletes, visibleByKey[key][0])
+			pl.Deletes = append(pl.Deletes, reconcileDeleteCall{Visible: visibleByKey[key][0], Managed: m})
 		}
 	}
 
-	sort.Slice(pl.Creates, func(i, j int) bool { return visibleRecordKey(pl.Creates[i].Hostname, pl.Creates[i].Answer) < visibleRecordKey(pl.Creates[j].Hostname, pl.Creates[j].Answer) })
-	sort.Slice(pl.Updates, func(i, j int) bool { return visibleRecordKey(pl.Updates[i].To.Hostname, pl.Updates[i].To.Answer) < visibleRecordKey(pl.Updates[j].To.Hostname, pl.Updates[j].To.Answer) })
-	sort.Slice(pl.Deletes, func(i, j int) bool { return visibleRecordKey(pl.Deletes[i].Hostname, pl.Deletes[i].Answer) < visibleRecordKey(pl.Deletes[j].Hostname, pl.Deletes[j].Answer) })
+	sort.Slice(pl.Creates, func(i, j int) bool {
+		return visibleRecordKey(pl.Creates[i].Hostname, pl.Creates[i].Answer) < visibleRecordKey(pl.Creates[j].Hostname, pl.Creates[j].Answer)
+	})
+	sort.Slice(pl.Updates, func(i, j int) bool {
+		return visibleRecordKey(pl.Updates[i].To.Hostname, pl.Updates[i].To.Answer) < visibleRecordKey(pl.Updates[j].To.Hostname, pl.Updates[j].To.Answer)
+	})
+	sort.Slice(pl.Deletes, func(i, j int) bool {
+		return visibleRecordKey(pl.Deletes[i].Visible.Hostname, pl.Deletes[i].Visible.Answer) < visibleRecordKey(pl.Deletes[j].Visible.Hostname, pl.Deletes[j].Visible.Answer)
+	})
 
 	return pl
 }

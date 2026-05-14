@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log/slog"
@@ -88,4 +89,48 @@ func parseRetryPolicy(cfg config.RetryConfig) (RetryPolicy, error) {
 		MaxInterval:     maxInterval,
 		MaxElapsedTime:  maxElapsed,
 	}, nil
+}
+
+func retryWithBackoff(ctx context.Context, policy RetryPolicy, operation func(attempt int) error, onRetry func(attempt int, delay time.Duration, err error)) error {
+	startedAt := time.Now()
+	delay := policy.InitialInterval
+
+	for attempt := 1; ; attempt++ {
+		err := operation(attempt)
+		if err == nil {
+			return nil
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
+		if time.Since(startedAt)+delay > policy.MaxElapsedTime {
+			return err
+		}
+
+		if onRetry != nil {
+			onRetry(attempt, delay, err)
+		}
+
+		if err := sleepContext(ctx, delay); err != nil {
+			return err
+		}
+
+		delay *= 2
+		if delay > policy.MaxInterval {
+			delay = policy.MaxInterval
+		}
+	}
+}
+
+func sleepContext(ctx context.Context, d time.Duration) error {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }

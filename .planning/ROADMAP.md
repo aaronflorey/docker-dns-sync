@@ -14,8 +14,8 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Runtime Foundation & Contracts** - Config-driven startup, provider wiring, and stable plugin boundaries.
 - [x] **Phase 2: Ownership-Safe Reconciliation Core** - Persist ownership and safely mutate only daemon-managed AdGuard rewrites. (completed 2026-05-13)
-- [ ] **Phase 3: Docker/Godoxy Snapshot Automation** - Derive desired rewrites from labeled containers and perform startup full sync.
-- [ ] **Phase 4: Recovery, Observability & Deployment** - Keep the daemon correct through restarts, disconnects, outages, and real operator deployment paths.
+- [x] **Phase 3: Docker/Godoxy Snapshot Automation** - Derive desired rewrites from labeled containers and perform startup full sync. (completed 2026-05-13)
+- [x] **Phase 4: Recovery, Observability & Deployment** - Keep the daemon correct through restarts, disconnects, outages, and real operator deployment paths. (completed 2026-05-13)
 
 ## Phase Details
 
@@ -62,7 +62,11 @@ Plans:
   2. Containers covered by Godoxy exclusion behavior do not generate DNS rewrites.
   3. Common Godoxy alias label patterns generate the expected derived hostnames for rewrite creation.
   4. When the daemon starts, it performs an initial full reconciliation from current source state before relying on live Docker events.
-**Plans**: TBD
+**Plans**: 2
+
+Plans:
+- [x] 03-01-PLAN.md — Freeze the MVP Godoxy DNS label subset in Docker-provider compatibility tests and helpers.
+- [x] 03-02-PLAN.md — Implement Docker snapshot `ListDesired` and feed the existing startup reconcile path.
 
 ### Phase 4: Recovery, Observability & Deployment
 **Goal**: Operators can keep the daemon converged across failures and run it in their preferred deployment mode.
@@ -75,7 +79,12 @@ Plans:
   3. After a temporary AdGuard Home outage, the daemon retries and converges when connectivity returns.
   4. Operator can observe structured logs for startup reconciliation, event handling, state persistence, output writes, retries, and error conditions.
   5. Operator can deploy the daemon as either a host binary or a Docker container using documented first-class setup paths.
-**Plans**: TBD
+**Plans**: 3
+
+Plans:
+- [x] 04-01-PLAN.md — Add steady-state Docker event watching, reconnect recovery, and runtime reconcile re-entry.
+- [x] 04-02-PLAN.md — Add retry-aware output/runtime operations and structured recovery logging.
+- [x] 04-03-PLAN.md — Ship first-class host-binary and Docker deployment artifacts plus operator docs.
 
 ## Progress
 
@@ -86,5 +95,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 |-------|----------------|--------|-----------|
 | 1. Runtime Foundation & Contracts | 4/4 | Complete | 2026-05-12 |
 | 2. Ownership-Safe Reconciliation Core | 2/2 | Complete   | 2026-05-13 |
-| 3. Docker/Godoxy Snapshot Automation | 0/TBD | Not started | - |
-| 4. Recovery, Observability & Deployment | 0/TBD | Not started | - |
+| 3. Docker/Godoxy Snapshot Automation | 2/2 | Complete | 2026-05-13 |
+| 4. Recovery, Observability & Deployment | 3/3 | Complete | 2026-05-13 |

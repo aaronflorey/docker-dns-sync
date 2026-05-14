@@ -15,28 +15,28 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Source Discovery
 
-- [ ] **SRC-01**: Operator can have eligible Docker containers discovered from Godoxy-compatible `proxy.*` labels.
-- [ ] **SRC-02**: Operator can rely on Godoxy exclusion behavior so excluded containers do not generate DNS rewrites.
-- [ ] **SRC-03**: Operator can rely on alias-derived hostname generation for common Godoxy label patterns needed to create DNS rewrites.
+- [x] **SRC-01**: Operator can have eligible Docker containers discovered from Godoxy-compatible `proxy.*` labels.
+- [x] **SRC-02**: Operator can rely on Godoxy exclusion behavior so excluded containers do not generate DNS rewrites.
+- [x] **SRC-03**: Operator can rely on alias-derived hostname generation for common Godoxy label patterns needed to create DNS rewrites.
 
 ### Reconciliation
 
-- [ ] **RECON-01**: Operator can start the daemon and have it perform an initial full reconciliation before relying on live Docker events.
+- [x] **RECON-01**: Operator can start the daemon and have it perform an initial full reconciliation before relying on live Docker events.
 - [x] **RECON-02**: Operator can have daemon-managed AdGuard Home rewrites created, updated, and deleted through idempotent item-level operations.
 - [x] **RECON-03**: Operator can trust the daemon to mutate only rewrites it previously created and tracks in local state.
 - [x] **RECON-04**: Operator can keep manual or pre-existing AdGuard rewrites untouched when they are not represented in daemon state.
 
 ### State And Recovery
 
-- [ ] **STATE-01**: Operator can restart the daemon or reboot the host and have reconciliation restore the correct managed rewrite set from source and persisted state.
+- [x] **STATE-01**: Operator can restart the daemon or reboot the host and have reconciliation restore the correct managed rewrite set from source and persisted state.
 - [x] **STATE-02**: Operator can trace every daemon-managed rewrite in local state back to its source container, generated domains, output identity, and last applied value.
-- [ ] **STATE-03**: Operator can recover from a Docker event stream disconnect because the daemon reconnects and runs reconciliation to repair missed changes.
-- [ ] **STATE-04**: Operator can recover from temporary AdGuard Home outages because the daemon retries and converges when connectivity returns.
+- [x] **STATE-03**: Operator can recover from a Docker event stream disconnect because the daemon reconnects and runs reconciliation to repair missed changes.
+- [x] **STATE-04**: Operator can recover from temporary AdGuard Home outages because the daemon retries and converges when connectivity returns.
 
 ### Operations
 
-- [ ] **OPS-01**: Operator can observe structured logs for startup reconciliation, event handling, state persistence, output writes, retries, and error conditions.
-- [ ] **OPS-02**: Operator can deploy the daemon as either a host binary or a Docker container using documented first-class deployment paths.
+- [x] **OPS-01**: Operator can observe structured logs for startup reconciliation, event handling, state persistence, output writes, retries, and error conditions.
+- [x] **OPS-02**: Operator can deploy the daemon as either a host binary or a Docker container using documented first-class deployment paths.
 - [x] **OPS-03**: Integrator can add a future source or output implementation without changing the reconciler contract.
 
 ## v2 Requirements
@@ -78,19 +78,19 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CONF-01 | Phase 1 | Complete |
 | CONF-02 | Phase 1 | Complete |
 | CONF-03 | Phase 1 | Complete |
-| SRC-01 | Phase 3 | Pending |
-| SRC-02 | Phase 3 | Pending |
-| SRC-03 | Phase 3 | Pending |
-| RECON-01 | Phase 3 | Pending |
+| SRC-01 | Phase 3 | Complete |
+| SRC-02 | Phase 3 | Complete |
+| SRC-03 | Phase 3 | Complete |
+| RECON-01 | Phase 3 | Complete |
 | RECON-02 | Phase 2 | Complete |
 | RECON-03 | Phase 2 | Complete |
 | RECON-04 | Phase 2 | Complete |
-| STATE-01 | Phase 4 | Pending |
+| STATE-01 | Phase 4 | Complete |
 | STATE-02 | Phase 2 | Complete |
-| STATE-03 | Phase 4 | Pending |
-| STATE-04 | Phase 4 | Pending |
-| OPS-01 | Phase 4 | Pending |
-| OPS-02 | Phase 4 | Pending |
+| STATE-03 | Phase 4 | Complete |
+| STATE-04 | Phase 4 | Complete |
+| OPS-01 | Phase 4 | Complete |
+| OPS-02 | Phase 4 | Complete |
 | OPS-03 | Phase 1 | Complete |
 
 **Coverage:**
@@ -100,4 +100,4 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 ---
 *Requirements defined: 2026-05-12*
-*Last updated: 2026-05-12 after roadmap creation*
+*Last updated: 2026-05-13 after Phase 4 execution*

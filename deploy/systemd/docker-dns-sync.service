@@ -1,0 +1,21 @@
+[Unit]
+Description=Docker DNS sync daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=docker-dns-sync
+Group=docker-dns-sync
+# Uncomment when using a local Docker socket with group-based access.
+# SupplementaryGroups=docker
+EnvironmentFile=-/etc/docker-dns-sync/docker-dns-sync.env
+ExecStart=/usr/local/bin/docker-dns-sync -config /etc/docker-dns-sync/config.toml
+Restart=on-failure
+RestartSec=5s
+WorkingDirectory=/var/lib/docker-dns-sync
+StateDirectory=docker-dns-sync
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
