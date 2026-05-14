@@ -2,12 +2,12 @@
 
 ## Overview
 
-This MVP roadmap delivers a safe Docker-to-AdGuard reconciliation daemon in four phases: first make configuration and extension boundaries stable, then prove ownership-safe reconciliation, then add Docker/Godoxy discovery with startup sync, and finally harden recovery, observability, and deployment so operators can trust it in normal failures.
+This MVP roadmap delivers a safe Docker-to-AdGuard reconciliation daemon across five executed phases: first make configuration and extension boundaries stable, then prove ownership-safe reconciliation, then add Docker/Godoxy discovery with startup sync, then harden recovery, observability, and deployment, and finally close the milestone audit gaps with targeted fixes and verification evidence.
 
 ## Phases
 
 **Phase Numbering:**
-- Integer phases (1, 2, 3): Planned milestone work
+- Integer phases (1, 2, 3, 4, 5): Planned milestone work
 - Decimal phases (2.1, 2.2): Urgent insertions (marked with INSERTED)
 
 Decimal phases appear between their surrounding integers in numeric order.
