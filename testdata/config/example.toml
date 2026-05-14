@@ -1,8 +1,9 @@
 [[sources]]
 type = "docker"
-name = "socket-proxy"
-# TCP socket proxy or remote Docker example.
-endpoint = "tcp://docker-socket-proxy:2375"
+name = "local-docker"
+# Local Docker socket example. For proxy or remote Docker access, start from
+# testdata/config/socket-proxy.toml instead.
+endpoint = "unix:///var/run/docker.sock"
 
 [[outputs]]
 type = "adguard"
@@ -12,6 +13,7 @@ username = "admin"
 password_ref = "ENV:ADGUARD_PASSWORD"
 
 [state]
+# This path must stay writable by the deployed process.
 path = "/var/lib/docker-dns-sync/state.json"
 
 [logging]

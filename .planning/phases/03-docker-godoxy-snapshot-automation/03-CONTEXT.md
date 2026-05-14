@@ -27,7 +27,7 @@ Phase 3 establishes Docker/Godoxy-driven desired-record snapshot generation for 
 ### Parsing And Target Resolution
 - **D-07:** Mirror a documented, test-backed subset of Godoxy behavior instead of importing or reusing Godoxy's full parser stack.
 - **D-08:** Keep the Docker source config surface endpoint-only unless planning proves a concrete gap; Phase 3 should derive behavior from Docker metadata and supported labels rather than adding new operator knobs by default.
-- **D-09:** Resolve each rewrite `answer` using Godoxy-style host-target precedence: use an explicit supported host override when present, otherwise use the derived default host target rather than blindly forcing container IP.
+- **D-09:** Resolve each rewrite `answer` using Godoxy-style host-target precedence: use an explicit supported host override when present, otherwise use the derived non-local endpoint host target and never fall back to container IPs.
 
 ### the agent's Discretion
 - Exact internal package layout for Docker label parsing and hostname derivation, as long as runtime still owns startup orchestration and the source contract stays snapshot-based.

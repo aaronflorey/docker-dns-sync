@@ -89,14 +89,10 @@ func TestFactoryRegistryDefaultAdGuardProviderIsReal(t *testing.T) {
 }
 
 func TestDockerSourceUsesConfiguredEndpoint(t *testing.T) {
-	t.Parallel()
-
 	registry := NewDefaultFactoryRegistry()
 	for _, endpoint := range []string{"unix:///var/run/docker.sock", "tcp://docker-socket-proxy:2375"} {
 		endpoint := endpoint
 		t.Run(endpoint, func(t *testing.T) {
-			t.Parallel()
-
 			sources, err := registry.BuildSources(validRuntimeConfig(endpoint), RuntimeDeps{})
 			if err != nil {
 				t.Fatalf("build sources: %v", err)

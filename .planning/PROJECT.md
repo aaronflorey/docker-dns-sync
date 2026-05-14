@@ -14,15 +14,15 @@ Operators get correct local DNS rewrites for eligible Docker workloads automatic
 
 ### Validated
 
-(None yet — ship to validate)
+- [x] Automatically discover eligible Docker containers from Godoxy-compatible labels and derive their desired DNS rewrites. (`SRC-01`, `SRC-02`, `SRC-03`; validated in Phase 3)
+- [x] Reconcile managed AdGuard Home rewrites on startup, runtime events, and recovery from disconnects or restarts. (`RECON-01`, `RECON-02`, `STATE-03`, `STATE-04`; validated by Phases 2-4)
+- [x] Persist local ownership state so only daemon-managed rewrites are mutated and full recovery is deterministic. (`RECON-03`, `RECON-04`, `STATE-01`, `STATE-02`; validated by Phases 2 and 4)
+- [x] Expose source and output plugin contracts so the reconciler can later support more providers without redesign. (`OPS-03`; validated in Phase 1)
+- [x] Support host-binary and Docker deployment with documented operator setup. (`OPS-02`; validated in Phase 4)
 
 ### Active
 
-- [ ] Automatically discover eligible Docker containers from Godoxy-compatible labels and derive their desired DNS rewrites.
-- [ ] Reconcile managed AdGuard Home rewrites on startup, runtime events, and recovery from disconnects or restarts.
-- [ ] Persist local ownership state so only daemon-managed rewrites are mutated and full recovery is deterministic.
-- [ ] Expose source and output plugin contracts so the reconciler can later support more providers without redesign.
-- [ ] Support host-binary and Docker deployment with documented operator setup.
+None. v1 MVP requirements are complete and validated.
 
 ### Out of Scope
 
@@ -35,7 +35,7 @@ Operators get correct local DNS rewrites for eligible Docker workloads automatic
 
 ## Context
 
-The project is a deterministic infrastructure daemon, not an AI system. The immediate problem is manual DNS rewrite management for Godoxy-labeled Docker workloads in AdGuard Home, which leads to stale entries, slow service availability, and fragile recovery after restarts.
+The project is a deterministic infrastructure daemon, not an AI system. The immediate problem is manual DNS rewrite management for Godoxy-labeled Docker workloads in AdGuard Home, which leads to stale entries, slow service availability, and fragile recovery after restarts. The completed v1 milestone now covers startup reconciliation, steady-state event handling, recovery from disconnects and restarts, and documented host-binary and Docker deployment paths.
 
 The MVP architecture centers on a configuration loader, source plugins, a normalization layer, a reconciler, a local state store, and output plugins. The first source is Docker with direct parsing of Godoxy-compatible `proxy.*` labels, including alias-derived hostnames and exclusion behavior. The first output is AdGuard Home via its HTTP API using item-level rewrite operations.
 
@@ -54,12 +54,12 @@ Correctness depends on three behaviors: an initial full reconciliation pass on s
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Build the MVP as a Go daemon | Strong fit for long-running infrastructure automation and Docker/HTTP integration | — Pending |
-| Use Docker labels as the source of truth instead of reading Godoxy runtime state | Keeps desired state close to workloads and avoids coupling to a separate controller surface | — Pending |
-| Use event-driven sync backed by reconciliation | Low-latency updates need events, but correctness across disconnects and restarts needs reconciliation | — Pending |
-| Track ownership in a persisted local state file | AdGuard rewrites do not provide daemon metadata, so safe mutation requires local ownership tracking | — Pending |
-| Keep plugin-oriented source and output contracts in MVP | Future expansion to more providers must not require replacing the reconciler contract | — Pending |
-| Limit MVP implementations to Docker/Godoxy input and AdGuard Home output | Keeps scope focused while preserving the architecture for later extensions | — Pending |
+| Build the MVP as a Go daemon | Strong fit for long-running infrastructure automation and Docker/HTTP integration | Validated in v1 |
+| Use Docker labels as the source of truth instead of reading Godoxy runtime state | Keeps desired state close to workloads and avoids coupling to a separate controller surface | Validated in v1 |
+| Use event-driven sync backed by reconciliation | Low-latency updates need events, but correctness across disconnects and restarts needs reconciliation | Validated in v1 |
+| Track ownership in a persisted local state file | AdGuard rewrites do not provide daemon metadata, so safe mutation requires local ownership tracking | Validated in v1 |
+| Keep plugin-oriented source and output contracts in MVP | Future expansion to more providers must not require replacing the reconciler contract | Validated in v1 |
+| Limit MVP implementations to Docker/Godoxy input and AdGuard Home output | Keeps scope focused while preserving the architecture for later extensions | Validated in v1 |
 
 ## Evolution
 
@@ -79,4 +79,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-12 after initialization*
+*Last updated: 2026-05-13 after v1 milestone completion audit*

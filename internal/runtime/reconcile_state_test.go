@@ -119,6 +119,46 @@ func TestPersistedManagedRecords(t *testing.T) {
 			t.Fatalf("expected one persisted record, got %d", len(saved.ManagedRecords))
 		}
 	})
+
+	t.Run("persists successful mutation progress before later failure", func(t *testing.T) {
+		t.Parallel()
+
+		statePath := filepath.Join(t.TempDir(), "state.json")
+		store, err := state.NewStore(statePath)
+		if err != nil {
+			t.Fatalf("new store: %v", err)
+		}
+
+		fakeOutput := &reconcilePartialCreateOutput{provider: provider}
+		current, err := store.Load()
+		if err != nil {
+			t.Fatalf("load current: %v", err)
+		}
+
+		_, err = ReconcileAndPersist(context.Background(), store, ReconcileInput{
+			Output: fakeOutput,
+			Desired: []contracts.DesiredRecord{
+				{Hostname: "app-1.local", Answer: "10.0.0.10", Source: contracts.SourceObjectRef{Provider: source.Provider, ID: "ctr-1", DisplayName: "svc-1"}},
+				{Hostname: "app-2.local", Answer: "10.0.0.11", Source: contracts.SourceObjectRef{Provider: source.Provider, ID: "ctr-2", DisplayName: "svc-2"}},
+			},
+			Visible: nil,
+			Owned:   current,
+		})
+		if err == nil {
+			t.Fatal("expected apply error")
+		}
+
+		saved, err := store.Load()
+		if err != nil {
+			t.Fatalf("load saved: %v", err)
+		}
+		if len(saved.ManagedRecords) != 1 {
+			t.Fatalf("expected one persisted managed record after partial failure, got %d", len(saved.ManagedRecords))
+		}
+		if saved.ManagedRecords[0].Hostname != "app-1.local" || saved.ManagedRecords[0].Answer != "10.0.0.10" {
+			t.Fatalf("unexpected persisted partial progress: %+v", saved.ManagedRecords[0])
+		}
+	})
 }
 
 type reconcileFakeOutputFailCreate struct {
@@ -141,5 +181,32 @@ func (f *reconcileFakeOutputFailCreate) Update(context.Context, contracts.Visibl
 }
 
 func (f *reconcileFakeOutputFailCreate) Delete(context.Context, contracts.VisibleRecord) error {
+	return nil
+}
+
+type reconcilePartialCreateOutput struct {
+	provider    contracts.ProviderRef
+	createCalls int
+}
+
+func (f *reconcilePartialCreateOutput) Provider() contracts.ProviderRef { return f.provider }
+
+func (f *reconcilePartialCreateOutput) ListVisible(context.Context) ([]contracts.VisibleRecord, error) {
+	return nil, nil
+}
+
+func (f *reconcilePartialCreateOutput) Create(context.Context, contracts.DesiredRecord) error {
+	f.createCalls++
+	if f.createCalls == 2 {
+		return errors.New("create failed")
+	}
+	return nil
+}
+
+func (f *reconcilePartialCreateOutput) Update(context.Context, contracts.VisibleRecord, contracts.DesiredRecord) error {
+	return nil
+}
+
+func (f *reconcilePartialCreateOutput) Delete(context.Context, contracts.VisibleRecord) error {
 	return nil
 }

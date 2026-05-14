@@ -85,6 +85,22 @@ type rewriteUpdateRequest struct {
 	Update rewriteItem `json:"update"`
 }
 
+type temporaryError struct {
+	err error
+}
+
+func (e temporaryError) Error() string {
+	return e.err.Error()
+}
+
+func (e temporaryError) Unwrap() error {
+	return e.err
+}
+
+func (e temporaryError) Temporary() bool {
+	return true
+}
+
 func (p *Provider) requestJSON(ctx context.Context, method, path string, reqBody any, out any) error {
 	if strings.TrimSpace(p.baseURL) == "" {
 		return errors.New("adguard base URL is required")
@@ -108,13 +124,21 @@ func (p *Provider) requestJSON(ctx context.Context, method, path string, reqBody
 
 	resp, err := p.client.Do(req)
 	if err != nil {
-		return fmt.Errorf("adguard request %s %s failed: %w", method, path, err)
+		requestErr := fmt.Errorf("adguard request %s %s failed: %w", method, path, err)
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return requestErr
+		}
+		return temporaryError{err: requestErr}
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		payload, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		return fmt.Errorf("adguard request %s %s failed with status %d: %s", method, path, resp.StatusCode, strings.TrimSpace(string(payload)))
+		requestErr := fmt.Errorf("adguard request %s %s failed with status %d: %s", method, path, resp.StatusCode, strings.TrimSpace(string(payload)))
+		if isTemporaryStatus(resp.StatusCode) {
+			return temporaryError{err: requestErr}
+		}
+		return requestErr
 	}
 
 	if out != nil {
@@ -124,4 +148,8 @@ func (p *Provider) requestJSON(ctx context.Context, method, path string, reqBody
 	}
 
 	return nil
+}
+
+func isTemporaryStatus(statusCode int) bool {
+	return statusCode == http.StatusRequestTimeout || statusCode == http.StatusTooManyRequests || statusCode >= http.StatusInternalServerError
 }

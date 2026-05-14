@@ -1,9 +1,10 @@
 package adguard
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
-	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -144,6 +145,46 @@ func TestAdGuardErrorsDoNotLeakCredentials(t *testing.T) {
 
 	if strings.Contains(err.Error(), "supersecret") || strings.Contains(err.Error(), "admin") {
 		t.Fatalf("error leaked credentials: %q", err.Error())
+	}
+}
+
+func TestAdGuardCreateMarksTemporaryServerFailuresRetryable(t *testing.T) {
+	t.Parallel()
+
+	testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "backend unavailable", http.StatusServiceUnavailable)
+	}))
+	defer testServer.Close()
+
+	provider := New(config.OutputConfig{Type: "adguard", Name: "primary", URL: testServer.URL, Username: "admin", Password: "supersecret"})
+	err := provider.Create(context.Background(), contracts.DesiredRecord{Hostname: "app.local", Answer: "10.0.0.10"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+
+	var temporary interface{ Temporary() bool }
+	if !errors.As(err, &temporary) || !temporary.Temporary() {
+		t.Fatalf("expected temporary retryable error, got %T: %v", err, err)
+	}
+}
+
+func TestAdGuardCreateLeavesBadRequestFailuresTerminal(t *testing.T) {
+	t.Parallel()
+
+	testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "bad request", http.StatusBadRequest)
+	}))
+	defer testServer.Close()
+
+	provider := New(config.OutputConfig{Type: "adguard", Name: "primary", URL: testServer.URL, Username: "admin", Password: "supersecret"})
+	err := provider.Create(context.Background(), contracts.DesiredRecord{Hostname: "app.local", Answer: "10.0.0.10"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+
+	var temporary interface{ Temporary() bool }
+	if errors.As(err, &temporary) && temporary.Temporary() {
+		t.Fatalf("expected terminal error for bad request, got %T: %v", err, err)
 	}
 }
 
