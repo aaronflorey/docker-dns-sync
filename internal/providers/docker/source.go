@@ -2,6 +2,7 @@ package docker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"sort"
@@ -65,7 +66,11 @@ func (p *Provider) ClientHost() string {
 func (p *Provider) ListDesired(ctx context.Context) ([]contracts.DesiredRecord, error) {
 	result, err := p.client.ContainerList(ctx, mobyclient.ContainerListOptions{})
 	if err != nil {
-		return nil, fmt.Errorf("list containers: %w", err)
+		requestErr := fmt.Errorf("list containers: %w", err)
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil, requestErr
+		}
+		return nil, temporaryError{err: requestErr}
 	}
 
 	desired := make([]contracts.DesiredRecord, 0)
@@ -82,6 +87,22 @@ func (p *Provider) ListDesired(ctx context.Context) ([]contracts.DesiredRecord, 
 	})
 
 	return desired, nil
+}
+
+type temporaryError struct {
+	err error
+}
+
+func (e temporaryError) Error() string {
+	return e.err.Error()
+}
+
+func (e temporaryError) Unwrap() error {
+	return e.err
+}
+
+func (e temporaryError) Temporary() bool {
+	return true
 }
 
 func (p *Provider) Watch(ctx context.Context) contracts.SourceWatch {

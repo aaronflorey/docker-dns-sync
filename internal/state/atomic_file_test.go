@@ -37,3 +37,21 @@ func TestAtomicWriteReplacesStateFile(t *testing.T) {
 		t.Fatalf("expected only ownership.json to remain, got %#v", entries)
 	}
 }
+
+func TestAtomicWriteCreatesNestedStateDirectory(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "state", "nested", "ownership.json")
+	if err := atomicWriteFile(path, []byte("new-state\n"), 0o600); err != nil {
+		t.Fatalf("atomic write: %v", err)
+	}
+
+	payload, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read state file: %v", err)
+	}
+
+	if string(payload) != "new-state\n" {
+		t.Fatalf("expected nested state contents, got %q", string(payload))
+	}
+}
