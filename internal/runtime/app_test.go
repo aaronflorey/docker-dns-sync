@@ -942,6 +942,78 @@ func TestReconcileRetriesFullPassAfterTransientListVisibleFailure(t *testing.T) 
 	}
 }
 
+func TestReconcileRetriesFullPassAfterTransientListDesiredFailure(t *testing.T) {
+	t.Parallel()
+
+	statePath := filepath.Join(t.TempDir(), "state.json")
+	store, err := state.NewStore(statePath)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	provider := contracts.ProviderRef{Type: "docker", Name: "local"}
+	source := &startupSourceStub{
+		provider:             provider,
+		failListDesiredAfter: 0,
+		failListDesired:      1,
+		desired: []contracts.DesiredRecord{{
+			Hostname: "app.local",
+			Answer:   "10.0.0.10",
+			Source:   contracts.SourceObjectRef{Provider: provider, ID: "ctr-1", DisplayName: "svc"},
+		}},
+	}
+	output := &startupOutputStub{provider: contracts.ProviderRef{Type: "adguard", Name: "primary"}}
+
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	deps := RuntimeDeps{
+		Logger: logger,
+		Retry: RetryPolicy{
+			InitialInterval: time.Millisecond,
+			MaxInterval:     time.Millisecond,
+			MaxElapsedTime:  50 * time.Millisecond,
+		},
+	}
+
+	app := New(testRuntimeConfig(statePath))
+	app.deps = deps
+	app.store = store
+	app.sources = []contracts.Source{source}
+	app.outputs = wrapOutputs([]contracts.Output{output}, deps)
+
+	if err := app.reconcile(context.Background(), "startup"); err != nil {
+		t.Fatalf("reconcile returned error: %v", err)
+	}
+
+	if source.listDesiredCallCount() != 2 {
+		t.Fatalf("expected 2 ListDesired calls, got %d", source.listDesiredCallCount())
+	}
+	if output.listVisibleCount() != 1 {
+		t.Fatalf("expected 1 ListVisible call after desired-state retry, got %d", output.listVisibleCount())
+	}
+	if output.createCount() != 1 {
+		t.Fatalf("expected 1 Create call, got %d", output.createCount())
+	}
+
+	snapshot, err := store.Load()
+	if err != nil {
+		t.Fatalf("load persisted snapshot: %v", err)
+	}
+	if len(snapshot.ManagedRecords) != 1 {
+		t.Fatalf("expected one persisted managed record, got %d", len(snapshot.ManagedRecords))
+	}
+
+	logs := buf.String()
+	for _, want := range []string{"retrying full reconcile after temporary source read failure", "reason=startup", "source=docker/local", "attempt=1"} {
+		if !strings.Contains(logs, want) {
+			t.Fatalf("expected log output to contain %q, got %s", want, logs)
+		}
+	}
+	if strings.Contains(logs, "secret") {
+		t.Fatalf("log output leaked secret-like value: %s", logs)
+	}
+}
+
 func TestReconcileRetriesFullPassAfterTransientCreateFailure(t *testing.T) {
 	t.Parallel()
 
@@ -1153,7 +1225,7 @@ func (s *startupSourceStub) ListDesired(context.Context) ([]contracts.DesiredRec
 		if msg == "" {
 			msg = "transient source failure"
 		}
-		return nil, errors.New(msg)
+		return nil, stubFailure(msg, true)
 	}
 
 	s.mu.Lock()

@@ -90,8 +90,23 @@ func (a *App) reconcile(ctx context.Context, reason string) error {
 			return ctx.Err()
 		}
 
+		var sourceErr sourceListError
+		if errors.As(err, &sourceErr) && isTemporaryError(err) {
+			if time.Since(startedAt)+delay > a.deps.Retry.MaxElapsedTime {
+				return err
+			}
+
+			a.deps.Logger.Warn("retrying full reconcile after temporary source read failure", "reason", reason, "source", providerKey(sourceErr.provider), "attempt", attempt, "next_delay", delay, "error", err)
+			if err := sleepContext(ctx, delay); err != nil {
+				return err
+			}
+
+			delay = nextBackoffDelay(delay, a.deps.Retry.MaxInterval)
+			continue
+		}
+
 		var outputErr outputListError
-		if errors.As(err, &outputErr) {
+		if errors.As(err, &outputErr) && isTemporaryError(err) {
 			if time.Since(startedAt)+delay > a.deps.Retry.MaxElapsedTime {
 				return err
 			}
@@ -101,10 +116,7 @@ func (a *App) reconcile(ctx context.Context, reason string) error {
 				return err
 			}
 
-			delay *= 2
-			if delay > a.deps.Retry.MaxInterval {
-				delay = a.deps.Retry.MaxInterval
-			}
+			delay = nextBackoffDelay(delay, a.deps.Retry.MaxInterval)
 			continue
 		}
 
@@ -121,10 +133,7 @@ func (a *App) reconcile(ctx context.Context, reason string) error {
 			return err
 		}
 
-		delay *= 2
-		if delay > a.deps.Retry.MaxInterval {
-			delay = a.deps.Retry.MaxInterval
-		}
+		delay = nextBackoffDelay(delay, a.deps.Retry.MaxInterval)
 	}
 }
 
@@ -230,7 +239,7 @@ func (a *App) runSteadyState(ctx context.Context) error {
 		reconnectDelays[i] = a.deps.Retry.InitialInterval
 		a.startSourceWatch(ctx, i, watchable, events)
 	}
-	if err := a.retryWatchTriggeredReconcile(ctx, -1, "watch_startup_handoff", "retrying watch-triggered full reconcile after source read failure"); err != nil {
+	if err := a.reconcile(ctx, "watch_startup_handoff"); err != nil {
 		return err
 	}
 	for i := range reconnectDelays {
@@ -244,7 +253,7 @@ func (a *App) runSteadyState(ctx context.Context) error {
 		case event := <-events:
 			if event.hint {
 				reconnectDelays[event.sourceIndex] = a.deps.Retry.InitialInterval
-				if err := a.retryWatchTriggeredReconcile(ctx, event.sourceIndex, "watch_hint", "retrying watch-triggered full reconcile after source read failure"); err != nil {
+				if err := a.reconcile(ctx, "watch_hint"); err != nil {
 					return err
 				}
 				continue
@@ -253,7 +262,7 @@ func (a *App) runSteadyState(ctx context.Context) error {
 			if event.reconnect {
 				reconnectPending[event.sourceIndex] = false
 				a.startSourceWatch(ctx, event.sourceIndex, watchers[event.sourceIndex], events)
-				if err := a.retryWatchTriggeredReconcile(ctx, event.sourceIndex, "watch_reconnect_repair", "retrying watch-triggered full reconcile after source read failure"); err != nil {
+				if err := a.reconcile(ctx, "watch_reconnect_repair"); err != nil {
 					return err
 				}
 				reconnectDelays[event.sourceIndex] = a.deps.Retry.InitialInterval
@@ -284,48 +293,6 @@ func (a *App) scheduleSourceReconnect(ctx context.Context, sourceIndex int, dela
 		case <-ctx.Done():
 		}
 	}()
-}
-
-func (a *App) retryWatchTriggeredReconcile(ctx context.Context, triggerSourceIndex int, reason string, retryMessage string) error {
-	var provider contracts.ProviderRef
-	if triggerSourceIndex >= 0 {
-		provider = a.sources[triggerSourceIndex].Provider()
-	}
-	startedAt := time.Now()
-	delay := a.deps.Retry.InitialInterval
-
-	for attempt := 1; ; attempt++ {
-		err := a.reconcile(ctx, reason)
-		if err == nil {
-			return nil
-		}
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-
-		var sourceErr sourceListError
-		if !errors.As(err, &sourceErr) {
-			return err
-		}
-		if time.Since(startedAt)+delay > a.deps.Retry.MaxElapsedTime {
-			return err
-		}
-
-		failedProvider := a.sources[sourceErr.sourceIndex].Provider()
-		args := []any{"failed_source", providerKey(failedProvider), "attempt", attempt, "next_delay", delay, "error", err}
-		if triggerSourceIndex >= 0 {
-			args = append([]any{"source", providerKey(provider)}, args...)
-		}
-		a.deps.Logger.Warn(retryMessage, args...)
-		if err := sleepContext(ctx, delay); err != nil {
-			return err
-		}
-
-		delay *= 2
-		if delay > a.deps.Retry.MaxInterval {
-			delay = a.deps.Retry.MaxInterval
-		}
-	}
 }
 
 func nextBackoffDelay(delay, maxInterval time.Duration) time.Duration {
