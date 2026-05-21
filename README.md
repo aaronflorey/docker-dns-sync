@@ -1,6 +1,16 @@
 # docker-dns-sync
 
+[![License](https://img.shields.io/github/license/aaronflorey/docker-dns-sync?style=flat-square)](LICENSE)
+[![CI](https://img.shields.io/github/actions/workflow/status/aaronflorey/docker-dns-sync/ci.yaml?branch=main&style=flat-square&label=ci)](https://github.com/aaronflorey/docker-dns-sync/actions/workflows/ci.yaml)
+[![Release](https://img.shields.io/github/v/release/aaronflorey/docker-dns-sync?display_name=tag&style=flat-square)](https://github.com/aaronflorey/docker-dns-sync/releases)
+
 `docker-dns-sync` is a Go daemon that watches Godoxy-labeled Docker workloads and keeps daemon-owned AdGuard Home DNS rewrites in sync.
+
+## Installation
+
+- Download the latest Linux release archive from GitHub Releases and place `docker-dns-sync` on your `PATH`.
+- Build from source with `mise install && mise exec -- go build -o bin/docker-dns-sync ./cmd/docker-dns-sync`.
+- Pull the release container image from `ghcr.io/aaronflorey/docker-dns-sync:<tag>`.
 
 ## What It Does
 
@@ -29,6 +39,18 @@ Required config sections:
 
 Use `password_ref = "ENV:ADGUARD_PASSWORD"` instead of embedding credentials in committed config.
 
+## Development
+
+- Install the pinned Go toolchain with `mise install`.
+- Run static checks with `mise exec -- go vet ./...`.
+- Run tests with `mise exec -- go test ./...`.
+
+## Release Automation
+
+- Pushes to `main` and `master` run CI and update the release-please PR.
+- Merging the release PR creates a `vX.Y.Z` tag and GitHub release.
+- Release publishing uploads Linux archives and checksums, then pushes a multi-arch container image to GHCR.
+
 ## Host Binary With systemd
 
 1. Build the binary with `mise exec -- go build -o bin/docker-dns-sync ./cmd/docker-dns-sync`.
@@ -47,7 +69,7 @@ Notes:
 
 ## Docker Deployment
 
-1. Build the image with `docker build -t docker-dns-sync .`.
+1. Pull a release image with `docker pull ghcr.io/aaronflorey/docker-dns-sync:<tag>`, or build locally with `docker build -t docker-dns-sync .`.
 2. Copy `testdata/config/docker-container.toml` to a host path such as `/opt/docker-dns-sync/config.toml` when mounting `/var/run/docker.sock`, or use `testdata/config/socket-proxy.toml` if the container should reach Docker through a TCP proxy or remote endpoint.
 3. Create a writable host directory for state such as `/opt/docker-dns-sync/state`.
 4. Provide the AdGuard password through an environment variable.
@@ -61,7 +83,7 @@ docker run -d \
   -v /opt/docker-dns-sync/config.toml:/etc/docker-dns-sync/config.toml:ro \
   -v /opt/docker-dns-sync/state:/var/lib/docker-dns-sync \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  docker-dns-sync \
+  ghcr.io/aaronflorey/docker-dns-sync:<tag> \
   -config /etc/docker-dns-sync/config.toml
 ```
 
@@ -81,3 +103,11 @@ Notes:
 - `testdata/config/socket-proxy.toml` - env-ref based TCP proxy or remote Docker example config.
 - `deploy/systemd/docker-dns-sync.service` - starting point for host deployment.
 - `Dockerfile` - container build for Docker deployment.
+
+## Contributing
+
+See `CONTRIBUTING.md` for local setup and pull request expectations.
+
+## License
+
+Released under the MIT License. See `LICENSE`.
