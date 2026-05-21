@@ -1,0 +1,23 @@
+[[sources]]
+type = "docker"
+name = "local-docker"
+endpoint = "unix:///var/run/docker.sock"
+
+[[outputs]]
+type = "adguard"
+name = "primary-adguard"
+url = "http://adguardhome:3000"
+username = "admin"
+password_ref = "ENV:ADGUARD_PASSWORD"
+
+[state]
+path = "/var/lib/docker-dns-sync/state.json"
+
+[logging]
+level = "debug"
+format = "text"
+
+[retry]
+initial_interval = "1s"
+max_interval = "10s"
+max_elapsed_time = "30s"

@@ -1,0 +1,75 @@
+name: docker-dns-sync-live-test
+
+services:
+  adguardhome:
+    image: adguard/adguardhome:latest
+    restart: unless-stopped
+    ports:
+      - "13000:3000/tcp"
+      - "5353:53/tcp"
+      - "5353:53/udp"
+    volumes:
+      - ./adguard/conf:/opt/adguardhome/conf
+      - ./adguard/work:/opt/adguardhome/work
+
+  adguard-init:
+    image: curlimages/curl:8.16.0
+    restart: "no"
+    depends_on:
+      - adguardhome
+    environment:
+      ADGUARD_PASSWORD: adguard-test-password
+    command:
+      - sh
+      - -ec
+      - |
+        auth_ready() {
+          [ "$(curl -s -o /dev/null -w '%{http_code}' -u "admin:$$ADGUARD_PASSWORD" http://adguardhome:3000/control/rewrite/list || true)" = "200" ]
+        }
+
+        until auth_ready || \
+          curl -fsS http://adguardhome:3000/control/install/get_addresses >/dev/null 2>&1; do
+          sleep 1
+        done
+
+        if auth_ready; then
+          exit 0
+        fi
+
+        curl -fsS \
+          -H 'Content-Type: application/json' \
+          -X POST \
+          http://adguardhome:3000/control/install/configure \
+          --data '{"web":{"ip":"0.0.0.0","port":3000},"dns":{"ip":"0.0.0.0","port":53},"username":"admin","password":"'"$$ADGUARD_PASSWORD"'"}'
+
+        until auth_ready; do
+          sleep 1
+        done
+
+  docker-dns-sync:
+    build:
+      context: ../../..
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      adguard-init:
+        condition: service_completed_successfully
+    environment:
+      ADGUARD_PASSWORD: adguard-test-password
+    command:
+      - -config
+      - /etc/docker-dns-sync/config.toml
+    volumes:
+      - ./config.toml:/etc/docker-dns-sync/config.toml:ro
+      - ./state:/var/lib/docker-dns-sync
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  whoami:
+    image: traefik/whoami:v1.11.0
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    labels:
+      - proxy.aliases=whoami.test
+      - proxy.whoami.test.port=80
+      - proxy.whoami.test.host=127.0.0.1
