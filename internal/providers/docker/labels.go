@@ -10,7 +10,7 @@ import (
 	containertypes "github.com/moby/moby/api/types/container"
 )
 
-func deriveDesiredRecords(provider contracts.ProviderRef, endpoint string, container containertypes.Summary) []contracts.DesiredRecord {
+func deriveDesiredRecords(provider contracts.ProviderRef, defaultTarget string, container containertypes.Summary) []contracts.DesiredRecord {
 	if isExcluded(container.Labels) {
 		return nil
 	}
@@ -20,7 +20,7 @@ func deriveDesiredRecords(provider contracts.ProviderRef, endpoint string, conta
 		return nil
 	}
 
-	answer := defaultAnswerTarget(endpoint)
+	answer := normalizeAnswerTarget(defaultTarget)
 
 	source := contracts.SourceObjectRef{
 		Provider:    provider,
@@ -181,14 +181,6 @@ func containerDisplayName(container containertypes.Summary) string {
 	}
 
 	return strings.TrimSpace(container.ID)
-}
-
-func defaultAnswerTarget(endpoint string) string {
-	if isLocalEndpoint(endpoint) {
-		return ""
-	}
-
-	return endpointHost(endpoint)
 }
 
 func isLocalEndpoint(endpoint string) bool {

@@ -37,6 +37,8 @@ Required config sections:
 - `[logging]` for log level and format.
 - `[retry]` for bounded backoff settings.
 
+For Docker sources, set `sources[].host_ip` to the host-reachable IP address that unlabeled records should answer with. Explicit `proxy.<alias>.host`, `proxy.#<n>.host`, and `proxy.*.host` labels still override that shared source IP.
+
 Use `password_ref = "ENV:ADGUARD_PASSWORD"` instead of embedding credentials in committed config.
 
 ## Development
@@ -90,6 +92,7 @@ docker run -d \
 Notes:
 
 - The container image runs as root on purpose so the documented `/var/run/docker.sock` mount works with the default host socket ownership and mode used by Docker installations.
+- For local Docker socket sources, set `host_ip` in the source config to the host-reachable address you want all derived records to answer with. Use `proxy.<alias>.host`, `proxy.#<n>.host`, or `proxy.*.host` only when a specific container needs a different answer target.
 - `testdata/config/example.toml` is intentionally host-oriented and leaves AdGuard at `127.0.0.1`; do not reuse it unchanged inside the container unless AdGuard is reachable at container-local localhost.
 - Mounting `/var/run/docker.sock` gives the container broad Docker control. If you do not want to grant that access, use a `tcp://...` endpoint such as `testdata/config/socket-proxy.toml` and give the container only the network path to that proxy or remote daemon.
 - If your host uses rootless Docker or a non-standard socket owner, adjust the container user or socket permissions to match that environment before mounting the socket.

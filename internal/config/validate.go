@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net/netip"
 	"strings"
 	"time"
 )
@@ -33,6 +34,13 @@ func Validate(cfg Config) error {
 		if !strings.HasPrefix(endpoint, "unix://") && !strings.HasPrefix(endpoint, "tcp://") {
 			return fmt.Errorf("sources[%d].endpoint must use unix:// or tcp://", i)
 		}
+
+		hostIP := strings.TrimSpace(source.HostIP)
+		if hostIP != "" {
+			if _, err := netip.ParseAddr(hostIP); err != nil {
+				return fmt.Errorf("sources[%d].host_ip must be a valid IP address", i)
+			}
+		}
 	}
 
 	for i, output := range cfg.Outputs {
@@ -44,18 +52,37 @@ func Validate(cfg Config) error {
 			return fmt.Errorf("outputs[%d].name is required", i)
 		}
 
-		if strings.TrimSpace(output.URL) == "" {
-			return fmt.Errorf("outputs[%d].url is required", i)
+		if !output.IsEnabled() {
+			continue
 		}
 
-		if strings.TrimSpace(output.Username) == "" {
-			return fmt.Errorf("outputs[%d].username is required", i)
-		}
+		switch strings.ToLower(strings.TrimSpace(output.Type)) {
+		case "adguard":
+			if strings.TrimSpace(output.URL) == "" {
+				return fmt.Errorf("outputs[%d].url is required", i)
+			}
 
-		hasPassword := strings.TrimSpace(output.Password) != ""
-		hasPasswordRef := strings.TrimSpace(output.PasswordRef) != ""
-		if hasPassword == hasPasswordRef {
-			return fmt.Errorf("outputs[%d] must set exactly one of password or password_ref", i)
+			if strings.TrimSpace(output.Username) == "" {
+				return fmt.Errorf("outputs[%d].username is required", i)
+			}
+
+			hasPassword := strings.TrimSpace(output.Password) != ""
+			hasPasswordRef := strings.TrimSpace(output.PasswordRef) != ""
+			if hasPassword == hasPasswordRef {
+				return fmt.Errorf("outputs[%d] must set exactly one of password or password_ref", i)
+			}
+		case "cloudflare":
+			if strings.TrimSpace(output.ZoneID) == "" {
+				return fmt.Errorf("outputs[%d].zone_id is required", i)
+			}
+
+			hasAPIKey := strings.TrimSpace(output.APIKey) != ""
+			hasAPIKeyRef := strings.TrimSpace(output.APIKeyRef) != ""
+			if hasAPIKey == hasAPIKeyRef {
+				return fmt.Errorf("outputs[%d] must set exactly one of api_key or api_key_ref", i)
+			}
+		default:
+			return fmt.Errorf("outputs[%d].type %q is not supported", i, output.Type)
 		}
 	}
 

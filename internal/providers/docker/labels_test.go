@@ -15,23 +15,23 @@ func TestDockerLabelsSubset(t *testing.T) {
 	provider := contracts.ProviderRef{Type: "docker", Name: "local"}
 
 	tests := []struct {
-		name      string
-		endpoint  string
-		container containertypes.Summary
-		want      []contracts.DesiredRecord
+		name          string
+		defaultTarget string
+		container     containertypes.Summary
+		want          []contracts.DesiredRecord
 	}{
 		{
-			name:     "omits local records without a derived target",
-			endpoint: "unix:///var/run/docker.sock",
+			name:          "omits local records without a derived target",
+			defaultTarget: "",
 			container: containerSummary("ctr-local-no-ip", "/edge", map[string]string{
 				"proxy.aliases":   "edge",
 				"proxy.edge.port": "8080",
-			}, "running", ""),
+			}, "running", "172.18.0.10"),
 			want: nil,
 		},
 		{
-			name:     "keeps explicit host overrides when the default target is unavailable",
-			endpoint: "unix:///var/run/docker.sock",
+			name:          "keeps explicit host overrides when the default target is unavailable",
+			defaultTarget: "",
 			container: containerSummary("ctr-local-host", "/edge", map[string]string{
 				"proxy.aliases":   "edge",
 				"proxy.edge.port": "8080",
@@ -44,8 +44,8 @@ func TestDockerLabelsSubset(t *testing.T) {
 			}},
 		},
 		{
-			name:     "falls back to endpoint host when aliases are absent",
-			endpoint: "tcp://edge.example:2375",
+			name:          "falls back to configured default target when aliases are absent",
+			defaultTarget: "edge.example",
 			container: containerSummary("ctr-1", "/app", map[string]string{
 				"proxy.*.port": "8080",
 			}, "running", "172.18.0.10"),
@@ -56,8 +56,8 @@ func TestDockerLabelsSubset(t *testing.T) {
 			}},
 		},
 		{
-			name:     "keeps explicit overrides and omits local aliases without a host target",
-			endpoint: "unix:///var/run/docker.sock",
+			name:          "keeps explicit overrides and omits local aliases without a host target",
+			defaultTarget: "",
 			container: containerSummary("ctr-2", "/svc", map[string]string{
 				"proxy.aliases": "api, admin",
 				"proxy.#1.port": "8080",
@@ -69,8 +69,8 @@ func TestDockerLabelsSubset(t *testing.T) {
 			},
 		},
 		{
-			name:     "preserves original alias positions for indexed host overrides after filtering",
-			endpoint: "unix:///var/run/docker.sock",
+			name:          "preserves original alias positions for indexed host overrides after filtering",
+			defaultTarget: "",
 			container: containerSummary("ctr-2b", "/svc", map[string]string{
 				"proxy.aliases": "skip, admin",
 				"proxy.#2.port": "9090",
@@ -81,8 +81,8 @@ func TestDockerLabelsSubset(t *testing.T) {
 			},
 		},
 		{
-			name:     "supports named aliases with wildcard and explicit host precedence",
-			endpoint: "tcp://docker.example:2375",
+			name:          "supports named aliases with wildcard and explicit host precedence",
+			defaultTarget: "docker.example",
 			container: containerSummary("ctr-3", "/frontend", map[string]string{
 				"proxy.app.port": "8080",
 				"proxy.www.port": "8080",
@@ -94,6 +94,19 @@ func TestDockerLabelsSubset(t *testing.T) {
 				{Hostname: "www", Answer: "www.internal", Source: contracts.SourceObjectRef{Provider: provider, ID: "ctr-3", DisplayName: "frontend"}},
 			},
 		},
+		{
+			name:          "uses shared source host ip for unlabeled answers",
+			defaultTarget: "192.168.1.50",
+			container: containerSummary("ctr-4b", "/svc", map[string]string{
+				"proxy.aliases": "app, admin",
+				"proxy.#1.port": "8080",
+				"proxy.#2.port": "9090",
+			}, "running", "172.18.0.31"),
+			want: []contracts.DesiredRecord{
+				{Hostname: "admin", Answer: "192.168.1.50", Source: contracts.SourceObjectRef{Provider: provider, ID: "ctr-4b", DisplayName: "svc"}},
+				{Hostname: "app", Answer: "192.168.1.50", Source: contracts.SourceObjectRef{Provider: provider, ID: "ctr-4b", DisplayName: "svc"}},
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -101,7 +114,7 @@ func TestDockerLabelsSubset(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			got := deriveDesiredRecords(provider, tt.endpoint, tt.container)
+			got := deriveDesiredRecords(provider, tt.defaultTarget, tt.container)
 			assertDesiredRecordsEqual(t, got, tt.want)
 		})
 	}
@@ -117,7 +130,7 @@ func TestDesiredRecordDerivation(t *testing.T) {
 		"proxy.api.host": "api.internal",
 	}, "running", "172.18.0.40")
 
-	got := deriveDesiredRecords(provider, "tcp://edge.example:2375", container)
+	got := deriveDesiredRecords(provider, "edge.example", container)
 	want := []contracts.DesiredRecord{
 		{Hostname: "api", Answer: "api.internal", Source: contracts.SourceObjectRef{Provider: provider, ID: "ctr-4", DisplayName: "edge"}},
 		{Hostname: "edge", Answer: "edge.example", Source: contracts.SourceObjectRef{Provider: provider, ID: "ctr-4", DisplayName: "edge"}},
@@ -136,7 +149,7 @@ func TestExcludedContainersProduceNoDesiredRecords(t *testing.T) {
 		"proxy.db.port": "5432",
 	}, "running", "172.18.0.50")
 
-	got := deriveDesiredRecords(provider, "unix:///var/run/docker.sock", container)
+	got := deriveDesiredRecords(provider, "", container)
 	if len(got) != 0 {
 		t.Fatalf("expected no desired records, got %+v", got)
 	}
@@ -183,7 +196,7 @@ func TestUnsupportedContainersProduceNoDesiredRecords(t *testing.T) {
 		t.Run(caseData.name, func(t *testing.T) {
 			t.Parallel()
 
-			got := deriveDesiredRecords(provider, "unix:///var/run/docker.sock", containerSummary("ctr-6", "/svc", caseData.labels, "running", "172.18.0.60"))
+			got := deriveDesiredRecords(provider, "", containerSummary("ctr-6", "/svc", caseData.labels, "running", "172.18.0.60"))
 			if len(got) != caseData.wantCount {
 				t.Fatalf("expected %d desired records, got %d (%+v)", caseData.wantCount, len(got), got)
 			}

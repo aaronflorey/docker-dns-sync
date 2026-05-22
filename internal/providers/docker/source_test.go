@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aaronflorey/docker-dns-sync/internal/config"
 	"github.com/aaronflorey/docker-dns-sync/internal/contracts"
 	containertypes "github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/events"
@@ -18,10 +19,11 @@ func TestListDesired(t *testing.T) {
 
 	providerRef := contracts.ProviderRef{Type: "docker", Name: "local"}
 	tests := []struct {
-		name       string
-		endpoint   string
-		containers []containertypes.Summary
-		want       []contracts.DesiredRecord
+		name        string
+		endpoint    string
+		defaultHost string
+		containers  []containertypes.Summary
+		want        []contracts.DesiredRecord
 	}{
 		{
 			name:     "returns desired records for eligible running containers only",
@@ -49,6 +51,17 @@ func TestListDesired(t *testing.T) {
 				{Hostname: "edge", Answer: "docker.example", Source: contracts.SourceObjectRef{Provider: providerRef, ID: "ctr-remote", DisplayName: "edge"}},
 			},
 		},
+		{
+			name:        "uses configured host ip for all unlabeled answers",
+			endpoint:    "unix:///var/run/docker.sock",
+			defaultHost: "192.168.1.50",
+			containers: []containertypes.Summary{
+				containerSummary("ctr-host-ip", "/edge", map[string]string{"proxy.aliases": "edge", "proxy.edge.port": "8080"}, "running", "172.18.0.44"),
+			},
+			want: []contracts.DesiredRecord{
+				{Hostname: "edge", Answer: "192.168.1.50", Source: contracts.SourceObjectRef{Provider: providerRef, ID: "ctr-host-ip", DisplayName: "edge"}},
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -57,12 +70,16 @@ func TestListDesired(t *testing.T) {
 			t.Parallel()
 
 			provider := &Provider{
-				ref:      providerRef,
-				endpoint: tt.endpoint,
+				ref:         providerRef,
+				endpoint:    tt.endpoint,
+				defaultHost: tt.defaultHost,
 				client: &fakeDockerClient{
 					host:       tt.endpoint,
 					containers: tt.containers,
 				},
+			}
+			if provider.defaultHost == "" {
+				provider.defaultHost = defaultAnswerTarget(config.SourceConfig{Endpoint: tt.endpoint})
 			}
 
 			got, err := provider.ListDesired(context.Background())
@@ -71,6 +88,43 @@ func TestListDesired(t *testing.T) {
 			}
 
 			assertDesiredRecordsEqual(t, got, tt.want)
+		})
+	}
+}
+
+func TestDefaultAnswerTarget(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		cfg  config.SourceConfig
+		want string
+	}{
+		{
+			name: "uses configured host ip when set",
+			cfg:  config.SourceConfig{Endpoint: "unix:///var/run/docker.sock", HostIP: "192.168.1.50"},
+			want: "192.168.1.50",
+		},
+		{
+			name: "uses remote endpoint host when host ip is unset",
+			cfg:  config.SourceConfig{Endpoint: "tcp://docker.example:2375"},
+			want: "docker.example",
+		},
+		{
+			name: "keeps local endpoint empty when host ip is unset",
+			cfg:  config.SourceConfig{Endpoint: "unix:///var/run/docker.sock"},
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := defaultAnswerTarget(tt.cfg); got != tt.want {
+				t.Fatalf("defaultAnswerTarget(%+v) = %q, want %q", tt.cfg, got, tt.want)
+			}
 		})
 	}
 }
