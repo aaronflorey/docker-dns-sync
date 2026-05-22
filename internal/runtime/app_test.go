@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aaronlmathis/docker-dns-sync/internal/config"
-	"github.com/aaronlmathis/docker-dns-sync/internal/contracts"
-	"github.com/aaronlmathis/docker-dns-sync/internal/state"
+	"github.com/aaronflorey/docker-dns-sync/internal/config"
+	"github.com/aaronflorey/docker-dns-sync/internal/contracts"
+	"github.com/aaronflorey/docker-dns-sync/internal/state"
 )
 
 func TestAppRunStartupReconcilesAndPersistsState(t *testing.T) {

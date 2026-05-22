@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/aaronlmathis/docker-dns-sync/internal/config"
+	"github.com/aaronflorey/docker-dns-sync/internal/config"
 )
 
 type RetryPolicy struct {

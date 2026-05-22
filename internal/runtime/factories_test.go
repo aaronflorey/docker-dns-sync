@@ -4,11 +4,11 @@ import (
 	"context"
 	"testing"
 
-	"github.com/aaronlmathis/docker-dns-sync/internal/config"
-	"github.com/aaronlmathis/docker-dns-sync/internal/contracts"
-	adguardprovider "github.com/aaronlmathis/docker-dns-sync/internal/providers/adguard"
-	adguardstub "github.com/aaronlmathis/docker-dns-sync/internal/providers/adguardstub"
-	dockerprovider "github.com/aaronlmathis/docker-dns-sync/internal/providers/docker"
+	"github.com/aaronflorey/docker-dns-sync/internal/config"
+	"github.com/aaronflorey/docker-dns-sync/internal/contracts"
+	adguardprovider "github.com/aaronflorey/docker-dns-sync/internal/providers/adguard"
+	adguardstub "github.com/aaronflorey/docker-dns-sync/internal/providers/adguardstub"
+	dockerprovider "github.com/aaronflorey/docker-dns-sync/internal/providers/docker"
 )
 
 func TestFactoryRegistryExtensibility(t *testing.T) {

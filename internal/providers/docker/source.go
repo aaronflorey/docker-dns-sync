@@ -8,8 +8,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/aaronlmathis/docker-dns-sync/internal/config"
-	"github.com/aaronlmathis/docker-dns-sync/internal/contracts"
+	"github.com/aaronflorey/docker-dns-sync/internal/config"
+	"github.com/aaronflorey/docker-dns-sync/internal/contracts"
 	containertypes "github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/events"
 	mobyclient "github.com/moby/moby/client"
