@@ -23,9 +23,10 @@ type apiClient interface {
 }
 
 type Provider struct {
-	ref      contracts.ProviderRef
-	endpoint string
-	client   apiClient
+	ref         contracts.ProviderRef
+	endpoint    string
+	defaultHost string
+	client      apiClient
 }
 
 func New(cfg config.SourceConfig) (*Provider, error) {
@@ -42,8 +43,9 @@ func New(cfg config.SourceConfig) (*Provider, error) {
 			Type: cfg.Type,
 			Name: cfg.Name,
 		},
-		endpoint: cfg.Endpoint,
-		client:   cli,
+		endpoint:    cfg.Endpoint,
+		defaultHost: defaultAnswerTarget(cfg),
+		client:      cli,
 	}, nil
 }
 
@@ -79,7 +81,7 @@ func (p *Provider) ListDesired(ctx context.Context) ([]contracts.DesiredRecord, 
 			continue
 		}
 
-		desired = append(desired, deriveDesiredRecords(p.ref, p.endpoint, container)...)
+		desired = append(desired, deriveDesiredRecords(p.ref, p.defaultHost, container)...)
 	}
 
 	sort.Slice(desired, func(i, j int) bool {
@@ -87,6 +89,18 @@ func (p *Provider) ListDesired(ctx context.Context) ([]contracts.DesiredRecord, 
 	})
 
 	return desired, nil
+}
+
+func defaultAnswerTarget(cfg config.SourceConfig) string {
+	if hostIP := normalizeAnswerTarget(cfg.HostIP); hostIP != "" {
+		return hostIP
+	}
+
+	if isLocalEndpoint(cfg.Endpoint) {
+		return ""
+	}
+
+	return endpointHost(cfg.Endpoint)
 }
 
 type temporaryError struct {

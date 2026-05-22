@@ -4,6 +4,8 @@ name = "local-docker"
 # Host-oriented local Docker socket example. For container deployment, start from
 # testdata/config/docker-container.toml or testdata/config/socket-proxy.toml instead.
 endpoint = "unix:///var/run/docker.sock"
+# Set the host-reachable IP that derived DNS records should answer with.
+host_ip = "192.168.1.50"
 
 [[outputs]]
 type = "adguard"
@@ -12,6 +14,14 @@ name = "primary-adguard"
 url = "http://127.0.0.1:3000"
 username = "admin"
 password_ref = "ENV:ADGUARD_PASSWORD"
+
+# Optional second output: enable Cloudflare sync for the same derived records.
+#[[outputs]]
+#type = "cloudflare"
+#name = "primary-cloudflare"
+#enabled = true
+#zone_id = "your-zone-id"
+#api_key_ref = "ENV:CLOUDFLARE_API_KEY"
 
 [state]
 # This path must stay writable by the deployed process.

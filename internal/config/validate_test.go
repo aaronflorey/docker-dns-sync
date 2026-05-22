@@ -104,6 +104,27 @@ func TestValidateRuntimeAndCredentialFields(t *testing.T) {
 			},
 			wantErr: "outputs[0].username is required",
 		},
+		{
+			name: "invalid source host ip",
+			mutate: func(cfg *Config) {
+				cfg.Sources[0].HostIP = "not-an-ip"
+			},
+			wantErr: "sources[0].host_ip must be a valid IP address",
+		},
+		{
+			name: "enabled cloudflare output requires zone id",
+			mutate: func(cfg *Config) {
+				cfg.Outputs = append(cfg.Outputs, OutputConfig{Type: "cloudflare", Name: "primary-cloudflare", APIKey: "secret-token"})
+			},
+			wantErr: "outputs[1].zone_id is required",
+		},
+		{
+			name: "enabled cloudflare output requires exactly one api key source",
+			mutate: func(cfg *Config) {
+				cfg.Outputs = append(cfg.Outputs, OutputConfig{Type: "cloudflare", Name: "primary-cloudflare", ZoneID: "zone-123"})
+			},
+			wantErr: "outputs[1] must set exactly one of api_key or api_key_ref",
+		},
 	}
 
 	for _, tt := range tests {
@@ -143,6 +164,34 @@ func TestResolveSecrets(t *testing.T) {
 		t.Fatalf("expected password_ref to be cleared after resolution, got %q", resolved.Outputs[0].PasswordRef)
 	}
 
+	cloudflareCfg := validConfig()
+	cloudflareCfg.Outputs = append(cloudflareCfg.Outputs, OutputConfig{
+		Type:      "cloudflare",
+		Name:      "primary-cloudflare",
+		ZoneID:    "zone-123",
+		APIKeyRef: "ENV:CLOUDFLARE_API_KEY",
+	})
+
+	resolved, err = ResolveSecrets(cloudflareCfg, func(name string) (string, bool) {
+		switch name {
+		case "CLOUDFLARE_API_KEY":
+			return "cloudflare-secret", true
+		default:
+			return "", false
+		}
+	})
+	if err != nil {
+		t.Fatalf("expected cloudflare env-backed secret to resolve, got %v", err)
+	}
+
+	if resolved.Outputs[1].APIKey != "cloudflare-secret" {
+		t.Fatalf("expected resolved api key, got %q", resolved.Outputs[1].APIKey)
+	}
+
+	if resolved.Outputs[1].APIKeyRef != "" {
+		t.Fatalf("expected api_key_ref to be cleared after resolution, got %q", resolved.Outputs[1].APIKeyRef)
+	}
+
 	_, err = ResolveSecrets(cfg, func(string) (string, bool) {
 		return "", false
 	})
@@ -163,6 +212,41 @@ func TestResolveSecrets(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "must start with \"ENV:\"") {
 		t.Fatalf("expected ENV prefix error, got %v", err)
+	}
+
+	disabledCfg := validConfig()
+	disabledCfg.Outputs = append(disabledCfg.Outputs, OutputConfig{
+		Type:        "cloudflare",
+		Name:        "disabled-cloudflare",
+		Enabled:     boolPtr(false),
+		APIKeyRef:   "ENV:MISSING_CLOUDFLARE_API_KEY",
+		PasswordRef: "ENV:MISSING_PASSWORD",
+	})
+
+	resolved, err = ResolveSecrets(disabledCfg, func(string) (string, bool) {
+		return "", false
+	})
+	if err != nil {
+		t.Fatalf("expected disabled output secret refs to be skipped, got %v", err)
+	}
+
+	if resolved.Outputs[1].APIKeyRef != "ENV:MISSING_CLOUDFLARE_API_KEY" {
+		t.Fatalf("expected disabled api_key_ref to remain unchanged, got %q", resolved.Outputs[1].APIKeyRef)
+	}
+}
+
+func TestValidateSkipsDisabledOutputs(t *testing.T) {
+	t.Parallel()
+
+	cfg := decodeFixture(t, "dual-output-disabled.toml")
+	if err := Validate(cfg); err != nil {
+		t.Fatalf("expected disabled secondary output to be ignored, got %v", err)
+	}
+
+	cfg.Outputs[1].Enabled = boolPtr(true)
+	err := Validate(cfg)
+	if err == nil || !strings.Contains(err.Error(), "outputs[1].zone_id is required") {
+		t.Fatalf("expected enabled secondary output to fail validation, got %v", err)
 	}
 }
 
@@ -203,4 +287,8 @@ func decodeFixture(t *testing.T, name string) Config {
 	}
 
 	return cfg
+}
+
+func boolPtr(value bool) *bool {
+	return &value
 }

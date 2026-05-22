@@ -8,6 +8,7 @@ import (
 	"github.com/aaronflorey/docker-dns-sync/internal/contracts"
 	adguardprovider "github.com/aaronflorey/docker-dns-sync/internal/providers/adguard"
 	adguardstub "github.com/aaronflorey/docker-dns-sync/internal/providers/adguardstub"
+	cloudflareprovider "github.com/aaronflorey/docker-dns-sync/internal/providers/cloudflare"
 	dockerprovider "github.com/aaronflorey/docker-dns-sync/internal/providers/docker"
 )
 
@@ -114,6 +115,52 @@ func TestDockerSourceUsesConfiguredEndpoint(t *testing.T) {
 	}
 }
 
+func TestBuildProvidersIncludesCloudflareOutput(t *testing.T) {
+	t.Parallel()
+
+	reg := NewDefaultFactoryRegistry()
+	_, outputs, err := reg.BuildProviders(config.Config{
+		Sources: []config.SourceConfig{{Type: "docker", Name: "local-docker", Endpoint: "unix:///var/run/docker.sock"}},
+		Outputs: []config.OutputConfig{
+			{Type: "adguard", Name: "primary-adguard", URL: "http://127.0.0.1:3000", Username: "admin", Password: "secret"},
+			{Type: "cloudflare", Name: "primary-cloudflare", ZoneID: "zone-123", APIKey: "token"},
+		},
+	}, RuntimeDeps{})
+	if err != nil {
+		t.Fatalf("build providers: %v", err)
+	}
+
+	if len(outputs) != 2 {
+		t.Fatalf("expected 2 outputs, got %d", len(outputs))
+	}
+
+	if _, ok := outputs[1].(*cloudflareprovider.Provider); !ok {
+		t.Fatalf("expected cloudflare provider, got %T", outputs[1])
+	}
+}
+
+func TestBuildOutputsSkipsDisabledOutput(t *testing.T) {
+	t.Parallel()
+
+	reg := NewDefaultFactoryRegistry()
+	outputs, err := reg.BuildOutputs(config.Config{
+		Outputs: []config.OutputConfig{
+			{Type: "adguard", Name: "primary-adguard", URL: "http://127.0.0.1:3000", Username: "admin", Password: "secret"},
+			{Type: "unknown-output", Name: "disabled-output", Enabled: boolPtr(false)},
+		},
+	}, RuntimeDeps{})
+	if err != nil {
+		t.Fatalf("build outputs: %v", err)
+	}
+
+	if len(outputs) != 1 {
+		t.Fatalf("expected 1 enabled output, got %d", len(outputs))
+	}
+	if _, ok := outputs[0].(*adguardprovider.Provider); !ok {
+		t.Fatalf("expected adguard provider, got %T", outputs[0])
+	}
+}
+
 type fakeSource struct {
 	provider contracts.ProviderRef
 }
@@ -165,4 +212,8 @@ func validRuntimeConfig(endpoint string) config.Config {
 			Password: "secret",
 		}},
 	}
+}
+
+func boolPtr(value bool) *bool {
+	return &value
 }

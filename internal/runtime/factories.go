@@ -8,6 +8,7 @@ import (
 	"github.com/aaronflorey/docker-dns-sync/internal/config"
 	"github.com/aaronflorey/docker-dns-sync/internal/contracts"
 	adguardprovider "github.com/aaronflorey/docker-dns-sync/internal/providers/adguard"
+	cloudflareprovider "github.com/aaronflorey/docker-dns-sync/internal/providers/cloudflare"
 	dockerprovider "github.com/aaronflorey/docker-dns-sync/internal/providers/docker"
 )
 
@@ -34,6 +35,9 @@ func NewDefaultFactoryRegistry() *FactoryRegistry {
 	}))
 	mustRegister(registry.RegisterOutput("adguard", func(cfg config.OutputConfig, _ RuntimeDeps) (contracts.Output, error) {
 		return adguardprovider.New(cfg), nil
+	}))
+	mustRegister(registry.RegisterOutput("cloudflare", func(cfg config.OutputConfig, _ RuntimeDeps) (contracts.Output, error) {
+		return cloudflareprovider.New(cfg), nil
 	}))
 	return registry
 }
@@ -110,6 +114,10 @@ func (r *FactoryRegistry) BuildSources(cfg config.Config, deps RuntimeDeps) ([]c
 func (r *FactoryRegistry) BuildOutputs(cfg config.Config, deps RuntimeDeps) ([]contracts.Output, error) {
 	outputs := make([]contracts.Output, 0, len(cfg.Outputs))
 	for i, outputCfg := range cfg.Outputs {
+		if !outputCfg.IsEnabled() {
+			continue
+		}
+
 		factory, ok := r.outputFactories[outputCfg.Type]
 		if !ok {
 			return nil, fmt.Errorf("outputs[%d]: unknown provider type %q", i, outputCfg.Type)

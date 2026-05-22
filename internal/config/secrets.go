@@ -19,23 +19,43 @@ func ResolveSecrets(cfg Config, lookup LookupEnvFunc) (Config, error) {
 	resolved.Outputs = append([]OutputConfig(nil), cfg.Outputs...)
 
 	for i := range resolved.Outputs {
+		if !resolved.Outputs[i].IsEnabled() {
+			continue
+		}
+
 		ref := strings.TrimSpace(resolved.Outputs[i].PasswordRef)
+		if ref != "" {
+			name, err := parseEnvRef(ref)
+			if err != nil {
+				return Config{}, fmt.Errorf("outputs[%d].password_ref: %w", i, err)
+			}
+
+			value, ok := lookup(name)
+			if !ok || strings.TrimSpace(value) == "" {
+				return Config{}, fmt.Errorf("outputs[%d].password_ref references an unset environment variable", i)
+			}
+
+			resolved.Outputs[i].Password = value
+			resolved.Outputs[i].PasswordRef = ""
+		}
+
+		ref = strings.TrimSpace(resolved.Outputs[i].APIKeyRef)
 		if ref == "" {
 			continue
 		}
 
 		name, err := parseEnvRef(ref)
 		if err != nil {
-			return Config{}, fmt.Errorf("outputs[%d].password_ref: %w", i, err)
+			return Config{}, fmt.Errorf("outputs[%d].api_key_ref: %w", i, err)
 		}
 
 		value, ok := lookup(name)
 		if !ok || strings.TrimSpace(value) == "" {
-			return Config{}, fmt.Errorf("outputs[%d].password_ref references an unset environment variable", i)
+			return Config{}, fmt.Errorf("outputs[%d].api_key_ref references an unset environment variable", i)
 		}
 
-		resolved.Outputs[i].Password = value
-		resolved.Outputs[i].PasswordRef = ""
+		resolved.Outputs[i].APIKey = value
+		resolved.Outputs[i].APIKeyRef = ""
 	}
 
 	return resolved, nil

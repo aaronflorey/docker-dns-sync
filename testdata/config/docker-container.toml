@@ -3,6 +3,8 @@ type = "docker"
 name = "local-docker"
 # Container deployment example using a mounted Docker socket.
 endpoint = "unix:///var/run/docker.sock"
+# Set the host-reachable IP that derived DNS records should answer with.
+host_ip = "192.168.1.50"
 
 [[outputs]]
 type = "adguard"
