@@ -3,7 +3,7 @@ package state
 import (
 	"time"
 
-	"github.com/aaronlmathis/docker-dns-sync/internal/contracts"
+	"github.com/aaronflorey/docker-dns-sync/internal/contracts"
 )
 
 const SnapshotVersion = 1

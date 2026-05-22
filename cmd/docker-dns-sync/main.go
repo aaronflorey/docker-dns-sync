@@ -9,8 +9,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/aaronlmathis/docker-dns-sync/internal/config"
-	"github.com/aaronlmathis/docker-dns-sync/internal/runtime"
+	"github.com/aaronflorey/docker-dns-sync/internal/config"
+	"github.com/aaronflorey/docker-dns-sync/internal/runtime"
 )
 
 type appRunner interface {

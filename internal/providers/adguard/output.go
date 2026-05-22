@@ -10,8 +10,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/aaronlmathis/docker-dns-sync/internal/config"
-	"github.com/aaronlmathis/docker-dns-sync/internal/contracts"
+	"github.com/aaronflorey/docker-dns-sync/internal/config"
+	"github.com/aaronflorey/docker-dns-sync/internal/contracts"
 )
 
 type Provider struct {

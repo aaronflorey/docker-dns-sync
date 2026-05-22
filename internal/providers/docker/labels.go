@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/aaronlmathis/docker-dns-sync/internal/contracts"
+	"github.com/aaronflorey/docker-dns-sync/internal/contracts"
 	containertypes "github.com/moby/moby/api/types/container"
 )
 
