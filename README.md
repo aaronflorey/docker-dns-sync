@@ -8,7 +8,8 @@
 
 ## Installation
 
-- Download the latest Linux release archive from GitHub Releases and place `docker-dns-sync` on your `PATH`.
+- Install from Homebrew with `brew install aaronflorey/tap/docker-dns-sync`.
+- Download the latest release archive for your platform from GitHub Releases and place `docker-dns-sync` on your `PATH`.
 - Build from source with `mise install && mise exec -- go build -o bin/docker-dns-sync ./cmd/docker-dns-sync`.
 - Pull the release container image from `ghcr.io/aaronflorey/docker-dns-sync:<tag>`.
 
@@ -27,7 +28,7 @@ The binary contract is:
 docker-dns-sync -config /etc/docker-dns-sync/config.toml
 ```
 
-Start from `testdata/config/example.toml` for a host-binary deployment with a local Docker socket, `testdata/config/docker-container.toml` for a Docker container deployment that mounts `/var/run/docker.sock`, or `testdata/config/socket-proxy.toml` for a TCP proxy or remote Docker source.
+Start from `testdata/config/example.toml` for a host-binary deployment with a local Docker socket, `config.example.toml` or `testdata/config/docker-container.toml` for a Docker container deployment that mounts `/var/run/docker.sock`, or `testdata/config/socket-proxy.toml` for a TCP proxy or remote Docker source.
 
 Required config sections:
 
@@ -46,12 +47,16 @@ Use `password_ref = "ENV:ADGUARD_PASSWORD"` instead of embedding credentials in 
 - Install the pinned Go toolchain with `mise install`.
 - Run static checks with `mise exec -- go vet ./...`.
 - Run tests with `mise exec -- go test ./...`.
+- Renovate is configured through `renovate.json` for Go modules, GitHub Actions, and container image references.
 
 ## Release Automation
 
 - Pushes to `main` and `master` run CI and update the release-please PR.
 - Merging the release PR creates a `vX.Y.Z` tag and GitHub release.
-- Release publishing uploads Linux archives and checksums, then pushes a multi-arch container image to GHCR.
+- Release publishing uploads macOS, Linux, and Windows archives plus checksums.
+- The same tagged GoReleaser run publishes multi-arch container images to GHCR.
+- The same tagged GoReleaser run updates the Homebrew formula in `aaronflorey/homebrew-tap`.
+- The release workflow requires a `HOMEBREW_TAP_GITHUB_TOKEN` secret with push access to `aaronflorey/homebrew-tap`.
 
 ## Host Binary With systemd
 
@@ -72,7 +77,7 @@ Notes:
 ## Docker Deployment
 
 1. Pull a release image with `docker pull ghcr.io/aaronflorey/docker-dns-sync:<tag>`, or build locally with `docker build -t docker-dns-sync .`.
-2. Copy `testdata/config/docker-container.toml` to a host path such as `/opt/docker-dns-sync/config.toml` when mounting `/var/run/docker.sock`, or use `testdata/config/socket-proxy.toml` if the container should reach Docker through a TCP proxy or remote endpoint.
+2. Use the root `docker-compose.yaml` plus `config.example.toml` for the simplest container deployment, or start from `testdata/config/docker-container.toml` / `testdata/config/socket-proxy.toml` for a custom deployment.
 3. Create a writable host directory for state such as `/opt/docker-dns-sync/state`.
 4. Provide the AdGuard password through an environment variable.
 5. Run the container:
@@ -102,6 +107,8 @@ Notes:
 ## Example Files
 
 - `testdata/config/example.toml` - env-ref based example config.
+- `config.example.toml` - root-level compose-oriented example config.
+- `docker-compose.yaml` - root-level container deployment example.
 - `testdata/config/docker-container.toml` - env-ref based Docker container config for `/var/run/docker.sock` plus network-reachable AdGuard.
 - `testdata/config/socket-proxy.toml` - env-ref based TCP proxy or remote Docker example config.
 - `deploy/systemd/docker-dns-sync.service` - starting point for host deployment.

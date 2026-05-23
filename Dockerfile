@@ -1,10 +1,13 @@
-FROM golang:1.26.3 AS build
+FROM --platform=$BUILDPLATFORM golang:1.26.3 AS build
 
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /out/docker-dns-sync ./cmd/docker-dns-sync
+
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /out/docker-dns-sync ./cmd/docker-dns-sync
 
 FROM gcr.io/distroless/static-debian12
 

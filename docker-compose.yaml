@@ -1,0 +1,15 @@
+name: docker-dns-sync
+
+services:
+  docker-dns-sync:
+    image: ${DOCKER_DNS_SYNC_IMAGE:-ghcr.io/aaronflorey/docker-dns-sync:latest}
+    restart: unless-stopped
+    environment:
+      ADGUARD_PASSWORD: ${ADGUARD_PASSWORD:?set ADGUARD_PASSWORD in your shell or .env}
+    command:
+      - -config
+      - /etc/docker-dns-sync/config.toml
+    volumes:
+      - ./config.example.toml:/etc/docker-dns-sync/config.toml:ro
+      - ./state:/var/lib/docker-dns-sync
+      - /var/run/docker.sock:/var/run/docker.sock
