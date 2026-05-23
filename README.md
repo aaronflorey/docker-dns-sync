@@ -53,7 +53,7 @@ Use `password_ref = "ENV:ADGUARD_PASSWORD"` instead of embedding credentials in 
 
 - Pushes to `main` and `master` run CI and update the release-please PR.
 - Merging the release PR creates a `vX.Y.Z` tag and GitHub release.
-- Release publishing uploads macOS, Linux, and Windows archives plus checksums.
+- Release publishing uploads macOS and Linux archives plus checksums.
 - The same tagged GoReleaser run publishes multi-arch container images to GHCR.
 - The same tagged GoReleaser run updates the Homebrew formula in `aaronflorey/homebrew-tap`.
 - The release workflow requires a `HOMEBREW_TAP_GITHUB_TOKEN` secret with push access to `aaronflorey/homebrew-tap`.
