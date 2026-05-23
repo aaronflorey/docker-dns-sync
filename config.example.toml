@@ -1,0 +1,28 @@
+[[sources]]
+type = "docker"
+name = "local-docker"
+# Root docker-compose example using the mounted Docker socket.
+endpoint = "unix:///var/run/docker.sock"
+# Set the host-reachable IP that derived DNS records should answer with.
+host_ip = "192.168.1.50"
+
+[[outputs]]
+type = "adguard"
+name = "primary-adguard"
+# Replace with the AdGuard Home URL reachable from this container.
+url = "http://adguardhome:3000"
+username = "admin"
+password_ref = "ENV:ADGUARD_PASSWORD"
+
+[state]
+# The compose file mounts ./state here for persistence across restarts.
+path = "/var/lib/docker-dns-sync/state.json"
+
+[logging]
+level = "info"
+format = "json"
+
+[retry]
+initial_interval = "1s"
+max_interval = "30s"
+max_elapsed_time = "5m"

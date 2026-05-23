@@ -10,6 +10,8 @@ builds:
       - CGO_ENABLED=0
     goos:
       - linux
+      - darwin
+      - windows
     goarch:
       - amd64
       - arm64
@@ -21,6 +23,75 @@ archives:
     formats:
       - tar.gz
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+
+dockers:
+  - id: docker-amd64
+    ids:
+      - docker-dns-sync
+    use: buildx
+    goos: linux
+    goarch: amd64
+    dockerfile: Dockerfile
+    image_templates:
+      - "ghcr.io/aaronflorey/docker-dns-sync:{{ .Version }}-amd64"
+      - "ghcr.io/aaronflorey/docker-dns-sync:{{ .Major }}.{{ .Minor }}-amd64"
+      - "ghcr.io/aaronflorey/docker-dns-sync:{{ .Major }}-amd64"
+      - "ghcr.io/aaronflorey/docker-dns-sync:latest-amd64"
+    build_flag_templates:
+      - "--platform=linux/amd64"
+      - "--pull"
+  - id: docker-arm64
+    ids:
+      - docker-dns-sync
+    use: buildx
+    goos: linux
+    goarch: arm64
+    dockerfile: Dockerfile
+    image_templates:
+      - "ghcr.io/aaronflorey/docker-dns-sync:{{ .Version }}-arm64"
+      - "ghcr.io/aaronflorey/docker-dns-sync:{{ .Major }}.{{ .Minor }}-arm64"
+      - "ghcr.io/aaronflorey/docker-dns-sync:{{ .Major }}-arm64"
+      - "ghcr.io/aaronflorey/docker-dns-sync:latest-arm64"
+    build_flag_templates:
+      - "--platform=linux/arm64"
+      - "--pull"
+
+docker_manifests:
+  - name_template: "ghcr.io/aaronflorey/docker-dns-sync:{{ .Version }}"
+    image_templates:
+      - "ghcr.io/aaronflorey/docker-dns-sync:{{ .Version }}-amd64"
+      - "ghcr.io/aaronflorey/docker-dns-sync:{{ .Version }}-arm64"
+  - name_template: "ghcr.io/aaronflorey/docker-dns-sync:{{ .Major }}.{{ .Minor }}"
+    image_templates:
+      - "ghcr.io/aaronflorey/docker-dns-sync:{{ .Major }}.{{ .Minor }}-amd64"
+      - "ghcr.io/aaronflorey/docker-dns-sync:{{ .Major }}.{{ .Minor }}-arm64"
+  - name_template: "ghcr.io/aaronflorey/docker-dns-sync:{{ .Major }}"
+    image_templates:
+      - "ghcr.io/aaronflorey/docker-dns-sync:{{ .Major }}-amd64"
+      - "ghcr.io/aaronflorey/docker-dns-sync:{{ .Major }}-arm64"
+  - name_template: "ghcr.io/aaronflorey/docker-dns-sync:latest"
+    image_templates:
+      - "ghcr.io/aaronflorey/docker-dns-sync:latest-amd64"
+      - "ghcr.io/aaronflorey/docker-dns-sync:latest-arm64"
+
+brews:
+  - name: docker-dns-sync
+    repository:
+      owner: aaronflorey
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Formula
+    homepage: https://github.com/aaronflorey/docker-dns-sync
+    description: Sync Godoxy-labeled Docker workloads into AdGuard Home rewrites
+    license: MIT
+    install: |
+      bin.install "docker-dns-sync"
+    test: |
+      assert_match "-config is required", shell_output("#{bin}/docker-dns-sync 2>&1", 1)
 
 checksum:
   name_template: checksums.txt
