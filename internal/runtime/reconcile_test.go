@@ -75,6 +75,41 @@ func TestReconcilePlanApply(t *testing.T) {
 		}
 	})
 
+	t.Run("update owned record when singleton visible hostname drifted away from old answer", func(t *testing.T) {
+		t.Parallel()
+
+		fakeOutput := &reconcileFakeOutput{provider: provider}
+		owned := state.Snapshot{ManagedRecords: []state.ManagedRecord{{
+			Output:   provider,
+			Source:   source,
+			Hostname: "s3.local",
+			Answer:   "origin.internal",
+		}}}
+
+		result, err := ReconcileOutput(context.Background(), ReconcileInput{
+			Output: fakeOutput,
+			Desired: []contracts.DesiredRecord{{Hostname: "s3.local", Answer: "10.0.0.11", Source: source}},
+			Visible: []contracts.VisibleRecord{{Output: provider, Hostname: "S3.local", Answer: "192.0.2.5"}},
+			Owned:   owned,
+		})
+		if err != nil {
+			t.Fatalf("reconcile output: %v", err)
+		}
+
+		if got := len(fakeOutput.created); got != 0 {
+			t.Fatalf("expected no create calls, got %d", got)
+		}
+		if got := len(fakeOutput.updated); got != 1 {
+			t.Fatalf("expected 1 update call, got %d", got)
+		}
+		if from := fakeOutput.updated[0].From; from.Hostname != "S3.local" || from.Answer != "192.0.2.5" {
+			t.Fatalf("unexpected update source: %+v", from)
+		}
+		if got := len(result.Next.ManagedRecords); got != 1 || result.Next.ManagedRecords[0].Answer != "10.0.0.11" {
+			t.Fatalf("unexpected next managed records: %+v", result.Next.ManagedRecords)
+		}
+	})
+
 	t.Run("delete stale owned records", func(t *testing.T) {
 		t.Parallel()
 

@@ -26,12 +26,15 @@ func buildReconcilePlan(output contracts.ProviderRef, desired []contracts.Desire
 	pl := reconcilePlan{AppliedIndex: make(map[string]state.ManagedRecord)}
 
 	visibleByKey := make(map[string][]contracts.VisibleRecord)
+	visibleByHostname := make(map[string][]contracts.VisibleRecord)
 	for _, v := range visible {
 		if v.Output != output {
 			continue
 		}
 		k := visibleRecordKey(v.Hostname, v.Answer)
 		visibleByKey[k] = append(visibleByKey[k], v)
+		hostname := normalizeHostname(v.Hostname)
+		visibleByHostname[hostname] = append(visibleByHostname[hostname], v)
 	}
 
 	for k, records := range visibleByKey {
@@ -57,6 +60,7 @@ func buildReconcilePlan(output contracts.ProviderRef, desired []contracts.Desire
 
 	for lineage, d := range desiredByLineage {
 		if ownedRecord, ok := ownedByLineage[lineage]; ok {
+			hostnameMatches := visibleByHostname[normalizeHostname(d.Hostname)]
 			oldKey := visibleRecordKey(ownedRecord.Hostname, ownedRecord.Answer)
 			newKey := visibleRecordKey(d.Hostname, d.Answer)
 			if len(visibleByKey[oldKey]) == 1 && visibleRecordKey(d.Hostname, d.Answer) != oldKey {
@@ -64,6 +68,10 @@ func buildReconcilePlan(output contracts.ProviderRef, desired []contracts.Desire
 				continue
 			}
 			if len(visibleByKey[oldKey]) > 1 {
+				continue
+			}
+			if len(hostnameMatches) == 1 && newKey != visibleRecordKey(hostnameMatches[0].Hostname, hostnameMatches[0].Answer) {
+				pl.Updates = append(pl.Updates, reconcileUpdateCall{From: hostnameMatches[0], To: d})
 				continue
 			}
 			if len(visibleByKey[newKey]) == 0 {
