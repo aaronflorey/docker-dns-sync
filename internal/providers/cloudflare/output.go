@@ -2,6 +2,7 @@ package cloudflare
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -95,7 +96,7 @@ func (p *Provider) Create(ctx context.Context, desired contracts.DesiredRecord) 
 		Body:   body,
 	})
 	if err != nil {
-		if isDuplicateRecordError(err) {
+		if isRecoverableDuplicateRecordError(err) {
 			if _, listErr := p.findVisibleRecord(ctx, desired.Hostname, desired.Answer); listErr == nil {
 				return nil
 			}
@@ -185,19 +186,57 @@ func (p *Provider) findVisibleRecord(ctx context.Context, hostname, answer strin
 	return meta, nil
 }
 
-func isDuplicateRecordError(err error) bool {
+func isRecoverableDuplicateRecordError(err error) bool {
 	var apiErr *cloudflare.Error
 	if !errors.As(err, &apiErr) {
 		return false
 	}
 
-	for _, item := range apiErr.Errors {
-		if item.Code == 81058 {
+	for _, code := range cloudflareErrorCodes(apiErr) {
+		switch code {
+		case 81053, 81054, 81057, 81058:
 			return true
 		}
 	}
 
 	return false
+}
+
+func cloudflareErrorCodes(apiErr *cloudflare.Error) []int64 {
+	if apiErr == nil {
+		return nil
+	}
+
+	codes := make([]int64, 0, len(apiErr.Errors))
+	seen := make(map[int64]struct{}, len(apiErr.Errors))
+	for _, item := range apiErr.Errors {
+		appendCloudflareErrorCode(&codes, seen, item.Code)
+
+		var raw struct {
+			ErrorChain []struct {
+				Code int64 `json:"code"`
+			} `json:"error_chain"`
+		}
+		if err := json.Unmarshal([]byte(item.JSON.RawJSON()), &raw); err != nil {
+			continue
+		}
+		for _, nested := range raw.ErrorChain {
+			appendCloudflareErrorCode(&codes, seen, nested.Code)
+		}
+	}
+
+	return codes
+}
+
+func appendCloudflareErrorCode(codes *[]int64, seen map[int64]struct{}, code int64) {
+	if code == 0 {
+		return
+	}
+	if _, ok := seen[code]; ok {
+		return
+	}
+	seen[code] = struct{}{}
+	*codes = append(*codes, code)
 }
 
 func buildRecordNewBody(hostname, answer string) (dns.RecordNewParamsBodyUnion, error) {

@@ -213,6 +213,126 @@ func TestCloudflareCreateRecoversDuplicateRecord(t *testing.T) {
 	}
 }
 
+func TestCloudflareCreateRecoversValidationErrorChainDuplicateRecord(t *testing.T) {
+	t.Parallel()
+
+	var listCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assertBearerToken(t, r)
+		if !strings.HasSuffix(r.URL.Path, "/zones/zone-123/dns_records") {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+
+		switch r.Method {
+		case http.MethodPost:
+			w.WriteHeader(http.StatusBadRequest)
+			writeCloudflareJSON(t, w, map[string]any{
+				"result":  nil,
+				"success": false,
+				"errors": []map[string]any{{
+					"code":    1004,
+					"message": "DNS Validation Error",
+					"error_chain": []map[string]any{{
+						"code":    81057,
+						"message": "The record already exists.",
+					}},
+				}},
+				"messages": []any{},
+			})
+		case http.MethodGet:
+			listCalls.Add(1)
+			if r.URL.Query().Get("page") == "2" {
+				writeCloudflareJSON(t, w, map[string]any{
+					"result":      []map[string]any{},
+					"success":     true,
+					"errors":      []any{},
+					"messages":    []any{},
+					"result_info": map[string]any{"page": 2, "per_page": 100},
+				})
+				return
+			}
+			writeCloudflareJSON(t, w, map[string]any{
+				"result": []map[string]any{{"id": "rec-a", "type": "A", "name": "whoami.test.jcaks.net", "content": "127.0.0.1"}},
+				"success":     true,
+				"errors":      []any{},
+				"messages":    []any{},
+				"result_info": map[string]any{"page": 1, "per_page": 100},
+			})
+		default:
+			t.Fatalf("unexpected method: %s", r.Method)
+		}
+	}))
+	defer server.Close()
+
+	provider := newTestProvider(server.URL)
+	provider.zoneName = "jcaks.net"
+	err := provider.Create(context.Background(), contracts.DesiredRecord{Hostname: "whoami.test", Answer: "127.0.0.1"})
+	if err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+	if got := listCalls.Load(); got != 2 {
+		t.Fatalf("expected two recovery list calls across pagination, got %d", got)
+	}
+}
+
+func TestCloudflareCreateRecoversSameHostCNAMEConflictWhenVisibleRecordMatches(t *testing.T) {
+	t.Parallel()
+
+	var listCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assertBearerToken(t, r)
+		if !strings.HasSuffix(r.URL.Path, "/zones/zone-123/dns_records") {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+
+		switch r.Method {
+		case http.MethodPost:
+			w.WriteHeader(http.StatusBadRequest)
+			writeCloudflareJSON(t, w, map[string]any{
+				"result":   nil,
+				"success":  false,
+				"errors":   []map[string]any{{"code": 81054, "message": "A CNAME record with that host already exists."}},
+				"messages": []any{},
+			})
+		case http.MethodGet:
+			listCalls.Add(1)
+			if r.URL.Query().Get("page") == "2" {
+				writeCloudflareJSON(t, w, map[string]any{
+					"result":      []map[string]any{},
+					"success":     true,
+					"errors":      []any{},
+					"messages":    []any{},
+					"result_info": map[string]any{"page": 2, "per_page": 100},
+				})
+				return
+			}
+			writeCloudflareJSON(t, w, map[string]any{
+				"result": []map[string]any{{"id": "rec-cname", "type": "CNAME", "name": "s3.example.com", "content": "origin.internal"}},
+				"success":     true,
+				"errors":      []any{},
+				"messages":    []any{},
+				"result_info": map[string]any{"page": 1, "per_page": 100},
+			})
+		default:
+			t.Fatalf("unexpected method: %s", r.Method)
+		}
+	}))
+	defer server.Close()
+
+	provider := newTestProvider(server.URL)
+	provider.zoneName = "example.com"
+	err := provider.Create(context.Background(), contracts.DesiredRecord{Hostname: "s3", Answer: "origin.internal"})
+	if err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+	if got := listCalls.Load(); got != 2 {
+		t.Fatalf("expected two recovery list calls across pagination, got %d", got)
+	}
+	if meta, ok := provider.lookupVisibleRecord("s3", "origin.internal"); !ok || meta.id != "rec-cname" {
+		t.Fatalf("expected cached record metadata after recovery, got %+v ok=%v", meta, ok)
+	}
+}
+
 func TestCloudflareCreateDuplicateWithoutVisibleMatchFails(t *testing.T) {
 	t.Parallel()
 
@@ -263,6 +383,112 @@ func TestCloudflareCreateDuplicateWithoutVisibleMatchFails(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "create cloudflare dns record") {
 		t.Fatalf("expected wrapped create error, got %v", err)
+	}
+}
+
+func TestCloudflareCreateNSConflictDoesNotAttemptDuplicateRecovery(t *testing.T) {
+	t.Parallel()
+
+	var listCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assertBearerToken(t, r)
+		if !strings.HasSuffix(r.URL.Path, "/zones/zone-123/dns_records") {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+
+		switch r.Method {
+		case http.MethodPost:
+			w.WriteHeader(http.StatusBadRequest)
+			writeCloudflareJSON(t, w, map[string]any{
+				"result":   nil,
+				"success":  false,
+				"errors":   []map[string]any{{"code": 81056, "message": "NS records with that host already exist."}},
+				"messages": []any{},
+			})
+		case http.MethodGet:
+			listCalls.Add(1)
+			writeCloudflareJSON(t, w, map[string]any{
+				"result":      []map[string]any{},
+				"success":     true,
+				"errors":      []any{},
+				"messages":    []any{},
+				"result_info": map[string]any{"page": 1, "per_page": 100},
+			})
+		default:
+			t.Fatalf("unexpected method: %s", r.Method)
+		}
+	}))
+	defer server.Close()
+
+	provider := newTestProvider(server.URL)
+	provider.zoneName = "example.com"
+	err := provider.Create(context.Background(), contracts.DesiredRecord{Hostname: "blog", Answer: "192.0.2.10"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if got := listCalls.Load(); got != 0 {
+		t.Fatalf("expected no recovery list calls for NS conflicts, got %d", got)
+	}
+}
+
+func TestRecoverableDuplicateRecordError(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		body map[string]any
+		want bool
+	}{
+		{
+			name: "top level identical duplicate",
+			body: map[string]any{"errors": []map[string]any{{"code": 81058, "message": "An identical record already exists."}}},
+			want: true,
+		},
+		{
+			name: "top level same host conflict",
+			body: map[string]any{"errors": []map[string]any{{"code": 81053, "message": "An A, AAAA or CNAME record already exists with that host."}}},
+			want: true,
+		},
+		{
+			name: "nested validation duplicate",
+			body: map[string]any{"errors": []map[string]any{{"code": 1004, "message": "DNS Validation Error", "error_chain": []map[string]any{{"code": 81057, "message": "The record already exists."}}}}},
+			want: true,
+		},
+		{
+			name: "ns conflict is not recoverable",
+			body: map[string]any{"errors": []map[string]any{{"code": 81056, "message": "NS records with that host already exist."}}},
+			want: false,
+		},
+		{
+			name: "non cloudflare error",
+			body: map[string]any{"errors": []map[string]any{{"code": 9000, "message": "Other error."}}},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			body, err := json.Marshal(map[string]any{
+				"result":   nil,
+				"success":  false,
+				"errors":   tt.body["errors"],
+				"messages": []any{},
+			})
+			if err != nil {
+				t.Fatalf("marshal body: %v", err)
+			}
+
+			var apiErr cloudflareapi.Error
+			if err := json.Unmarshal(body, &apiErr); err != nil {
+				t.Fatalf("unmarshal error body: %v", err)
+			}
+
+			if got := isRecoverableDuplicateRecordError(&apiErr); got != tt.want {
+				t.Fatalf("isRecoverableDuplicateRecordError() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 
