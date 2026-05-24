@@ -333,6 +333,80 @@ func TestCloudflareCreateRecoversSameHostCNAMEConflictWhenVisibleRecordMatches(t
 	}
 }
 
+func TestCloudflareCreateTakesOverUniqueHostnameConflictByUpdatingRecord(t *testing.T) {
+	t.Parallel()
+
+	var listCalls atomic.Int32
+	var putCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assertBearerToken(t, r)
+
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/zones/zone-123/dns_records"):
+			switch r.Method {
+			case http.MethodPost:
+				w.WriteHeader(http.StatusBadRequest)
+				writeCloudflareJSON(t, w, map[string]any{
+					"result":   nil,
+					"success":  false,
+					"errors":   []map[string]any{{"code": 81054, "message": "A CNAME record with that host already exists."}},
+					"messages": []any{},
+				})
+			case http.MethodGet:
+				listCalls.Add(1)
+				if r.URL.Query().Get("page") == "2" {
+					writeCloudflareJSON(t, w, map[string]any{
+						"result":      []map[string]any{},
+						"success":     true,
+						"errors":      []any{},
+						"messages":    []any{},
+						"result_info": map[string]any{"page": 2, "per_page": 100},
+					})
+					return
+				}
+				writeCloudflareJSON(t, w, map[string]any{
+					"result": []map[string]any{{"id": "rec-cname", "type": "CNAME", "name": "s3.example.com", "content": "origin.internal"}},
+					"success":     true,
+					"errors":      []any{},
+					"messages":    []any{},
+					"result_info": map[string]any{"page": 1, "per_page": 100},
+				})
+			default:
+				t.Fatalf("unexpected method: %s", r.Method)
+			}
+		case strings.HasSuffix(r.URL.Path, "/zones/zone-123/dns_records/rec-cname"):
+			if r.Method != http.MethodPut {
+				t.Fatalf("expected PUT, got %s", r.Method)
+			}
+			putCalls.Add(1)
+			body := decodeBody(t, r)
+			if body["type"] != "A" || body["content"] != "192.168.1.142" || body["name"] != "s3" {
+				t.Fatalf("unexpected takeover update body: %+v", body)
+			}
+			writeCloudflareJSON(t, w, map[string]any{"result": map[string]any{"id": "rec-cname"}, "success": true, "errors": []any{}, "messages": []any{}})
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	provider := newTestProvider(server.URL)
+	provider.zoneName = "example.com"
+	err := provider.Create(context.Background(), contracts.DesiredRecord{Hostname: "s3", Answer: "192.168.1.142"})
+	if err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+	if got := listCalls.Load(); got != 2 {
+		t.Fatalf("expected two recovery list calls across pagination, got %d", got)
+	}
+	if got := putCalls.Load(); got != 1 {
+		t.Fatalf("expected one takeover update call, got %d", got)
+	}
+	if meta, ok := provider.lookupVisibleRecord("s3", "origin.internal"); !ok || meta.id != "rec-cname" {
+		t.Fatalf("expected cached record metadata after recovery, got %+v ok=%v", meta, ok)
+	}
+}
+
 func TestCloudflareCreateDuplicateWithoutVisibleMatchFails(t *testing.T) {
 	t.Parallel()
 

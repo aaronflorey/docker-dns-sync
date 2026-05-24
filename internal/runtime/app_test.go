@@ -73,7 +73,8 @@ func TestAppRunStartupUpdatesOwnedHostnameWhenVisibleRecordDrifted(t *testing.T)
 	t.Parallel()
 
 	provider := contracts.ProviderRef{Type: "adguard", Name: "primary"}
-	sourceRef := contracts.SourceObjectRef{Provider: contracts.ProviderRef{Type: "docker", Name: "local"}, ID: "ctr-1", DisplayName: "svc"}
+	oldSourceRef := contracts.SourceObjectRef{Provider: contracts.ProviderRef{Type: "docker", Name: "local"}, ID: "ctr-1", DisplayName: "svc"}
+	sourceRef := contracts.SourceObjectRef{Provider: oldSourceRef.Provider, ID: "ctr-2", DisplayName: oldSourceRef.DisplayName}
 	statePath := filepath.Join(t.TempDir(), "state.json")
 
 	store, err := state.NewStore(statePath)
@@ -82,7 +83,7 @@ func TestAppRunStartupUpdatesOwnedHostnameWhenVisibleRecordDrifted(t *testing.T)
 	}
 	if err := store.Save(state.Snapshot{ManagedRecords: []state.ManagedRecord{{
 		Output:   provider,
-		Source:   sourceRef,
+		Source:   oldSourceRef,
 		Hostname: "s3.local",
 		Answer:   "origin.internal",
 	}}}); err != nil {
@@ -121,6 +122,65 @@ func TestAppRunStartupUpdatesOwnedHostnameWhenVisibleRecordDrifted(t *testing.T)
 	}
 	if snapshot.ManagedRecords[0].Answer != "192.168.1.142" {
 		t.Fatalf("unexpected persisted record: %+v", snapshot.ManagedRecords[0])
+	}
+
+	cancel()
+	assertRunStops(t, done)
+}
+
+func TestAppRunStartupUpdatesOwnedHostnameWhenContainerIdentityChanges(t *testing.T) {
+	t.Parallel()
+
+	provider := contracts.ProviderRef{Type: "adguard", Name: "primary"}
+	oldSourceRef := contracts.SourceObjectRef{Provider: contracts.ProviderRef{Type: "docker", Name: "local"}, ID: "ctr-1", DisplayName: "svc"}
+	sourceRef := contracts.SourceObjectRef{Provider: oldSourceRef.Provider, ID: "ctr-9", DisplayName: "svc-recreated"}
+	statePath := filepath.Join(t.TempDir(), "state.json")
+
+	store, err := state.NewStore(statePath)
+	if err != nil {
+		t.Fatalf("create state store: %v", err)
+	}
+	if err := store.Save(state.Snapshot{ManagedRecords: []state.ManagedRecord{{
+		Output:   provider,
+		Source:   oldSourceRef,
+		Hostname: "s3.local",
+		Answer:   "origin.internal",
+	}}}); err != nil {
+		t.Fatalf("seed state store: %v", err)
+	}
+
+	output := &startupOutputStub{
+		provider: provider,
+		visible:  []contracts.VisibleRecord{{Output: provider, Hostname: "s3.local", Answer: "legacy.internal"}},
+	}
+	app := New(testRuntimeConfig(statePath))
+	app.registry = testRegistry(
+		stubSourceFactory{source: &startupSourceStub{provider: sourceRef.Provider, desired: []contracts.DesiredRecord{{Hostname: "s3.local", Answer: "192.168.1.142", Source: sourceRef}}}},
+		stubOutputFactory{output: output},
+	)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- app.Run(ctx)
+	}()
+
+	waitForCondition(t, func() bool {
+		return output.updateCount() == 1
+	})
+	if got := output.createCount(); got != 0 {
+		t.Fatalf("expected no create calls, got %d", got)
+	}
+
+	snapshot, err := store.Load()
+	if err != nil {
+		t.Fatalf("load persisted snapshot: %v", err)
+	}
+	if len(snapshot.ManagedRecords) != 1 {
+		t.Fatalf("expected one persisted managed record, got %d", len(snapshot.ManagedRecords))
+	}
+	if snapshot.ManagedRecords[0].Source.ID != "ctr-9" || snapshot.ManagedRecords[0].Source.DisplayName != "svc-recreated" {
+		t.Fatalf("unexpected persisted source identity: %+v", snapshot.ManagedRecords[0].Source)
 	}
 
 	cancel()
