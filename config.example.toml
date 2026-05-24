@@ -3,6 +3,8 @@ type = "docker"
 name = "local-docker"
 # Root docker-compose example using the mounted Docker socket.
 endpoint = "unix:///var/run/docker.sock"
+# Append this suffix to label-derived hostnames like "foo" -> "foo.bar.bz".
+base_domain = "bar.bz"
 # Set the host-reachable IP that derived DNS records should answer with.
 host_ip = "192.168.1.50"
 

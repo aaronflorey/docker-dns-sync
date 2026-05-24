@@ -112,6 +112,13 @@ func TestValidateRuntimeAndCredentialFields(t *testing.T) {
 			wantErr: "sources[0].host_ip must be a valid IP address",
 		},
 		{
+			name: "invalid source base domain",
+			mutate: func(cfg *Config) {
+				cfg.Sources[0].BaseDomain = "bad domain"
+			},
+			wantErr: "sources[0].base_domain must be a valid domain name",
+		},
+		{
 			name: "enabled cloudflare output requires zone id",
 			mutate: func(cfg *Config) {
 				cfg.Outputs = append(cfg.Outputs, OutputConfig{Type: "cloudflare", Name: "primary-cloudflare", APIKey: "secret-token"})

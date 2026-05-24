@@ -9,10 +9,11 @@ type Config struct {
 }
 
 type SourceConfig struct {
-	Type     string `toml:"type"`
-	Name     string `toml:"name"`
-	Endpoint string `toml:"endpoint"`
-	HostIP   string `toml:"host_ip"`
+	Type       string `toml:"type"`
+	Name       string `toml:"name"`
+	Endpoint   string `toml:"endpoint"`
+	HostIP     string `toml:"host_ip"`
+	BaseDomain string `toml:"base_domain"`
 }
 
 type OutputConfig struct {

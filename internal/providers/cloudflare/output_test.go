@@ -6,8 +6,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"sync/atomic"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/aaronflorey/docker-dns-sync/internal/config"
@@ -69,7 +69,7 @@ func TestCloudflareListVisibleCachesRecordMetadata(t *testing.T) {
 	}
 }
 
-func TestCloudflareListVisibleStripsZoneSuffix(t *testing.T) {
+func TestCloudflareListVisibleKeepsFQDN(t *testing.T) {
 	t.Parallel()
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -89,7 +89,7 @@ func TestCloudflareListVisibleStripsZoneSuffix(t *testing.T) {
 		}
 
 		writeCloudflareJSON(t, w, map[string]any{
-			"result": []map[string]any{{"id": "rec-a", "type": "A", "name": "whoami.test.jcaks.net", "content": "127.0.0.1"}},
+			"result":      []map[string]any{{"id": "rec-a", "type": "A", "name": "whoami.test.jcaks.net", "content": "127.0.0.1"}},
 			"success":     true,
 			"errors":      []any{},
 			"messages":    []any{},
@@ -107,8 +107,8 @@ func TestCloudflareListVisibleStripsZoneSuffix(t *testing.T) {
 	if len(visible) != 1 {
 		t.Fatalf("expected 1 visible record, got %d", len(visible))
 	}
-	if visible[0].Hostname != "whoami.test" {
-		t.Fatalf("expected zone-relative hostname, got %+v", visible[0])
+	if visible[0].Hostname != "whoami.test.jcaks.net" {
+		t.Fatalf("expected fqdn hostname, got %+v", visible[0])
 	}
 }
 
@@ -187,7 +187,7 @@ func TestCloudflareCreateRecoversDuplicateRecord(t *testing.T) {
 				return
 			}
 			writeCloudflareJSON(t, w, map[string]any{
-				"result": []map[string]any{{"id": "rec-a", "type": "A", "name": "whoami.test.jcaks.net", "content": "127.0.0.1"}},
+				"result":      []map[string]any{{"id": "rec-a", "type": "A", "name": "whoami.test.jcaks.net", "content": "127.0.0.1"}},
 				"success":     true,
 				"errors":      []any{},
 				"messages":    []any{},
@@ -201,14 +201,14 @@ func TestCloudflareCreateRecoversDuplicateRecord(t *testing.T) {
 
 	provider := newTestProvider(server.URL)
 	provider.zoneName = "jcaks.net"
-	err := provider.Create(context.Background(), contracts.DesiredRecord{Hostname: "whoami.test", Answer: "127.0.0.1"})
+	err := provider.Create(context.Background(), contracts.DesiredRecord{Hostname: "whoami.test.jcaks.net", Answer: "127.0.0.1"})
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
 	if got := listCalls.Load(); got != 2 {
 		t.Fatalf("expected two recovery list calls across pagination, got %d", got)
 	}
-	if meta, ok := provider.lookupVisibleRecord("whoami.test", "127.0.0.1"); !ok || meta.id != "rec-a" {
+	if meta, ok := provider.lookupVisibleRecord("whoami.test.jcaks.net", "127.0.0.1"); !ok || meta.id != "rec-a" {
 		t.Fatalf("expected cached record metadata after recovery, got %+v ok=%v", meta, ok)
 	}
 }
@@ -252,7 +252,7 @@ func TestCloudflareCreateRecoversValidationErrorChainDuplicateRecord(t *testing.
 				return
 			}
 			writeCloudflareJSON(t, w, map[string]any{
-				"result": []map[string]any{{"id": "rec-a", "type": "A", "name": "whoami.test.jcaks.net", "content": "127.0.0.1"}},
+				"result":      []map[string]any{{"id": "rec-a", "type": "A", "name": "whoami.test.jcaks.net", "content": "127.0.0.1"}},
 				"success":     true,
 				"errors":      []any{},
 				"messages":    []any{},
@@ -266,7 +266,7 @@ func TestCloudflareCreateRecoversValidationErrorChainDuplicateRecord(t *testing.
 
 	provider := newTestProvider(server.URL)
 	provider.zoneName = "jcaks.net"
-	err := provider.Create(context.Background(), contracts.DesiredRecord{Hostname: "whoami.test", Answer: "127.0.0.1"})
+	err := provider.Create(context.Background(), contracts.DesiredRecord{Hostname: "whoami.test.jcaks.net", Answer: "127.0.0.1"})
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
@@ -307,7 +307,7 @@ func TestCloudflareCreateRecoversSameHostCNAMEConflictWhenVisibleRecordMatches(t
 				return
 			}
 			writeCloudflareJSON(t, w, map[string]any{
-				"result": []map[string]any{{"id": "rec-cname", "type": "CNAME", "name": "s3.example.com", "content": "origin.internal"}},
+				"result":      []map[string]any{{"id": "rec-cname", "type": "CNAME", "name": "s3.example.com", "content": "origin.internal"}},
 				"success":     true,
 				"errors":      []any{},
 				"messages":    []any{},
@@ -321,14 +321,14 @@ func TestCloudflareCreateRecoversSameHostCNAMEConflictWhenVisibleRecordMatches(t
 
 	provider := newTestProvider(server.URL)
 	provider.zoneName = "example.com"
-	err := provider.Create(context.Background(), contracts.DesiredRecord{Hostname: "s3", Answer: "origin.internal"})
+	err := provider.Create(context.Background(), contracts.DesiredRecord{Hostname: "s3.example.com", Answer: "origin.internal"})
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
 	if got := listCalls.Load(); got != 2 {
 		t.Fatalf("expected two recovery list calls across pagination, got %d", got)
 	}
-	if meta, ok := provider.lookupVisibleRecord("s3", "origin.internal"); !ok || meta.id != "rec-cname" {
+	if meta, ok := provider.lookupVisibleRecord("s3.example.com", "origin.internal"); !ok || meta.id != "rec-cname" {
 		t.Fatalf("expected cached record metadata after recovery, got %+v ok=%v", meta, ok)
 	}
 }
@@ -365,7 +365,7 @@ func TestCloudflareCreateTakesOverUniqueHostnameConflictByUpdatingRecord(t *test
 					return
 				}
 				writeCloudflareJSON(t, w, map[string]any{
-					"result": []map[string]any{{"id": "rec-cname", "type": "CNAME", "name": "s3.example.com", "content": "origin.internal"}},
+					"result":      []map[string]any{{"id": "rec-cname", "type": "CNAME", "name": "s3.example.com", "content": "origin.internal"}},
 					"success":     true,
 					"errors":      []any{},
 					"messages":    []any{},
@@ -380,7 +380,7 @@ func TestCloudflareCreateTakesOverUniqueHostnameConflictByUpdatingRecord(t *test
 			}
 			putCalls.Add(1)
 			body := decodeBody(t, r)
-			if body["type"] != "A" || body["content"] != "192.168.1.142" || body["name"] != "s3" {
+			if body["type"] != "A" || body["content"] != "192.168.1.142" || body["name"] != "s3.example.com" {
 				t.Fatalf("unexpected takeover update body: %+v", body)
 			}
 			writeCloudflareJSON(t, w, map[string]any{"result": map[string]any{"id": "rec-cname"}, "success": true, "errors": []any{}, "messages": []any{}})
@@ -392,7 +392,7 @@ func TestCloudflareCreateTakesOverUniqueHostnameConflictByUpdatingRecord(t *test
 
 	provider := newTestProvider(server.URL)
 	provider.zoneName = "example.com"
-	err := provider.Create(context.Background(), contracts.DesiredRecord{Hostname: "s3", Answer: "192.168.1.142"})
+	err := provider.Create(context.Background(), contracts.DesiredRecord{Hostname: "s3.example.com", Answer: "192.168.1.142"})
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
@@ -402,7 +402,7 @@ func TestCloudflareCreateTakesOverUniqueHostnameConflictByUpdatingRecord(t *test
 	if got := putCalls.Load(); got != 1 {
 		t.Fatalf("expected one takeover update call, got %d", got)
 	}
-	if meta, ok := provider.lookupVisibleRecord("s3", "origin.internal"); !ok || meta.id != "rec-cname" {
+	if meta, ok := provider.lookupVisibleRecord("s3.example.com", "origin.internal"); !ok || meta.id != "rec-cname" {
 		t.Fatalf("expected cached record metadata after recovery, got %+v ok=%v", meta, ok)
 	}
 }
@@ -437,7 +437,7 @@ func TestCloudflareCreateDuplicateWithoutVisibleMatchFails(t *testing.T) {
 				return
 			}
 			writeCloudflareJSON(t, w, map[string]any{
-				"result": []map[string]any{{"id": "rec-other", "type": "A", "name": "other.example.com", "content": "10.0.0.11"}},
+				"result":      []map[string]any{{"id": "rec-other", "type": "A", "name": "other.example.com", "content": "10.0.0.11"}},
 				"success":     true,
 				"errors":      []any{},
 				"messages":    []any{},

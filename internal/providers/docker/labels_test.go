@@ -114,7 +114,7 @@ func TestDockerLabelsSubset(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			got := deriveDesiredRecords(provider, tt.defaultTarget, tt.container)
+			got := deriveDesiredRecords(provider, tt.defaultTarget, "", tt.container)
 			assertDesiredRecordsEqual(t, got, tt.want)
 		})
 	}
@@ -130,7 +130,7 @@ func TestDesiredRecordDerivation(t *testing.T) {
 		"proxy.api.host": "api.internal",
 	}, "running", "172.18.0.40")
 
-	got := deriveDesiredRecords(provider, "edge.example", container)
+	got := deriveDesiredRecords(provider, "edge.example", "", container)
 	want := []contracts.DesiredRecord{
 		{Hostname: "api", Answer: "api.internal", Source: contracts.SourceObjectRef{Provider: provider, ID: "ctr-4", DisplayName: "edge"}},
 		{Hostname: "edge", Answer: "edge.example", Source: contracts.SourceObjectRef{Provider: provider, ID: "ctr-4", DisplayName: "edge"}},
@@ -149,7 +149,7 @@ func TestExcludedContainersProduceNoDesiredRecords(t *testing.T) {
 		"proxy.db.port": "5432",
 	}, "running", "172.18.0.50")
 
-	got := deriveDesiredRecords(provider, "", container)
+	got := deriveDesiredRecords(provider, "", "", container)
 	if len(got) != 0 {
 		t.Fatalf("expected no desired records, got %+v", got)
 	}
@@ -196,7 +196,7 @@ func TestUnsupportedContainersProduceNoDesiredRecords(t *testing.T) {
 		t.Run(caseData.name, func(t *testing.T) {
 			t.Parallel()
 
-			got := deriveDesiredRecords(provider, "", containerSummary("ctr-6", "/svc", caseData.labels, "running", "172.18.0.60"))
+			got := deriveDesiredRecords(provider, "", "", containerSummary("ctr-6", "/svc", caseData.labels, "running", "172.18.0.60"))
 			if len(got) != caseData.wantCount {
 				t.Fatalf("expected %d desired records, got %d (%+v)", caseData.wantCount, len(got), got)
 			}
@@ -205,6 +205,25 @@ func TestUnsupportedContainersProduceNoDesiredRecords(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDesiredRecordDerivationAppendsBaseDomain(t *testing.T) {
+	t.Parallel()
+
+	provider := contracts.ProviderRef{Type: "docker", Name: "local"}
+	container := containerSummary("ctr-7", "/edge", map[string]string{
+		"proxy.aliases":  "api, app.example.com",
+		"proxy.*.port":   "8080",
+		"proxy.api.host": "api.internal",
+	}, "running", "172.18.0.40")
+
+	got := deriveDesiredRecords(provider, "edge.example", "bar.bz", container)
+	want := []contracts.DesiredRecord{
+		{Hostname: "api.bar.bz", Answer: "api.internal", Source: contracts.SourceObjectRef{Provider: provider, ID: "ctr-7", DisplayName: "edge"}},
+		{Hostname: "app.example.com", Answer: "edge.example", Source: contracts.SourceObjectRef{Provider: provider, ID: "ctr-7", DisplayName: "edge"}},
+	}
+
+	assertDesiredRecordsEqual(t, got, want)
 }
 
 func containerSummary(id, name string, labels map[string]string, state containertypes.ContainerState, ip string) containertypes.Summary {

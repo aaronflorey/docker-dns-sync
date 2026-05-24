@@ -26,6 +26,7 @@ type Provider struct {
 	ref         contracts.ProviderRef
 	endpoint    string
 	defaultHost string
+	baseDomain  string
 	client      apiClient
 }
 
@@ -45,6 +46,7 @@ func New(cfg config.SourceConfig) (*Provider, error) {
 		},
 		endpoint:    cfg.Endpoint,
 		defaultHost: defaultAnswerTarget(cfg),
+		baseDomain:  normalizeName(cfg.BaseDomain),
 		client:      cli,
 	}, nil
 }
@@ -81,7 +83,7 @@ func (p *Provider) ListDesired(ctx context.Context) ([]contracts.DesiredRecord, 
 			continue
 		}
 
-		desired = append(desired, deriveDesiredRecords(p.ref, p.defaultHost, container)...)
+		desired = append(desired, deriveDesiredRecords(p.ref, p.defaultHost, p.baseDomain, container)...)
 	}
 
 	sort.Slice(desired, func(i, j int) bool {

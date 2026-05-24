@@ -11,6 +11,7 @@ The Docker provider uses the Moby client with API version negotiation. It reads 
 - `proxy.#<n>.port` and `proxy.*.port` support indexed and wildcard ports.
 - `proxy.<alias>.host`, `proxy.#<n>.host`, and `proxy.*.host` override the answer target.
 - `proxy.exclude=true` opts a container out.
+- If `base_domain` is configured on the source, bare aliases are expanded to FQDNs before reconciliation.
 
 ## AdGuard Home output
 
@@ -27,7 +28,7 @@ Temporary statuses treated as retryable include `408`, `429`, and `5xx` response
 
 The Cloudflare provider uses an API token and a zone ID.
 
-- It lists DNS records for the zone.
+- It lists DNS records for the zone and keeps hostnames as FQDNs in the daemon model.
 - It caches record IDs for update/delete.
 - It creates `A`, `AAAA`, or `CNAME` records based on the target value.
 - It recovers duplicate-create error code `81058` by re-reading visible records.
