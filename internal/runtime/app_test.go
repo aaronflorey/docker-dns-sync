@@ -69,6 +69,64 @@ func TestAppRunStartupReconcilesAndPersistsState(t *testing.T) {
 	}
 }
 
+func TestAppRunStartupUpdatesOwnedHostnameWhenVisibleRecordDrifted(t *testing.T) {
+	t.Parallel()
+
+	provider := contracts.ProviderRef{Type: "adguard", Name: "primary"}
+	sourceRef := contracts.SourceObjectRef{Provider: contracts.ProviderRef{Type: "docker", Name: "local"}, ID: "ctr-1", DisplayName: "svc"}
+	statePath := filepath.Join(t.TempDir(), "state.json")
+
+	store, err := state.NewStore(statePath)
+	if err != nil {
+		t.Fatalf("create state store: %v", err)
+	}
+	if err := store.Save(state.Snapshot{ManagedRecords: []state.ManagedRecord{{
+		Output:   provider,
+		Source:   sourceRef,
+		Hostname: "s3.local",
+		Answer:   "origin.internal",
+	}}}); err != nil {
+		t.Fatalf("seed state store: %v", err)
+	}
+
+	output := &startupOutputStub{
+		provider: provider,
+		visible:  []contracts.VisibleRecord{{Output: provider, Hostname: "s3.local", Answer: "legacy.internal"}},
+	}
+	app := New(testRuntimeConfig(statePath))
+	app.registry = testRegistry(
+		stubSourceFactory{source: &startupSourceStub{provider: sourceRef.Provider, desired: []contracts.DesiredRecord{{Hostname: "s3.local", Answer: "192.168.1.142", Source: sourceRef}}}},
+		stubOutputFactory{output: output},
+	)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- app.Run(ctx)
+	}()
+
+	waitForCondition(t, func() bool {
+		return output.updateCount() == 1
+	})
+	if got := output.createCount(); got != 0 {
+		t.Fatalf("expected no create calls, got %d", got)
+	}
+
+	snapshot, err := store.Load()
+	if err != nil {
+		t.Fatalf("load persisted snapshot: %v", err)
+	}
+	if len(snapshot.ManagedRecords) != 1 {
+		t.Fatalf("expected one persisted managed record, got %d", len(snapshot.ManagedRecords))
+	}
+	if snapshot.ManagedRecords[0].Answer != "192.168.1.142" {
+		t.Fatalf("unexpected persisted record: %+v", snapshot.ManagedRecords[0])
+	}
+
+	cancel()
+	assertRunStops(t, done)
+}
+
 func TestAppRunExecutesStartupReconcileBeforeCancellation(t *testing.T) {
 	t.Parallel()
 
@@ -1244,6 +1302,7 @@ type startupOutputStub struct {
 	provider         contracts.ProviderRef
 	visible          []contracts.VisibleRecord
 	created          []contracts.DesiredRecord
+	updated          []reconcileUpdateCall
 	listVisibleCalls int
 	mu               sync.Mutex
 }
@@ -1267,7 +1326,19 @@ func (o *startupOutputStub) Create(_ context.Context, desired contracts.DesiredR
 	return nil
 }
 
-func (o *startupOutputStub) Update(context.Context, contracts.VisibleRecord, contracts.DesiredRecord) error {
+
+func (o *startupOutputStub) Update(_ context.Context, visible contracts.VisibleRecord, desired contracts.DesiredRecord) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.updated = append(o.updated, reconcileUpdateCall{From: visible, To: desired})
+	for i, current := range o.visible {
+		if visibleRecordKey(current.Hostname, current.Answer) != visibleRecordKey(visible.Hostname, visible.Answer) {
+			continue
+		}
+		o.visible[i] = contracts.VisibleRecord{Output: o.provider, Hostname: desired.Hostname, Answer: desired.Answer}
+		return nil
+	}
+	o.visible = append(o.visible, contracts.VisibleRecord{Output: o.provider, Hostname: desired.Hostname, Answer: desired.Answer})
 	return nil
 }
 
@@ -1285,6 +1356,12 @@ func (o *startupOutputStub) listVisibleCount() int {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	return o.listVisibleCalls
+}
+
+func (o *startupOutputStub) updateCount() int {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return len(o.updated)
 }
 
 type watchSession struct {
