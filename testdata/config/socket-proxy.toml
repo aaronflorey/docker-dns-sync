@@ -3,6 +3,7 @@ type = "docker"
 name = "socket-proxy"
 # Docker reachable through a TCP socket proxy or remote daemon.
 endpoint = "tcp://docker-socket-proxy:2375"
+base_domain = "bar.bz"
 
 [[outputs]]
 type = "adguard"

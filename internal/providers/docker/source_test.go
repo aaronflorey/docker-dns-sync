@@ -22,12 +22,14 @@ func TestListDesired(t *testing.T) {
 		name        string
 		endpoint    string
 		defaultHost string
+		baseDomain  string
 		containers  []containertypes.Summary
 		want        []contracts.DesiredRecord
 	}{
 		{
-			name:     "returns desired records for eligible running containers only",
-			endpoint: "tcp://edge.example:2375",
+			name:       "returns desired records for eligible running containers only",
+			endpoint:   "tcp://edge.example:2375",
+			baseDomain: "bar.bz",
 			containers: []containertypes.Summary{
 				containerSummary("ctr-z", "/skip-excluded", map[string]string{"proxy.exclude": "true", "proxy.aliases": "skip", "proxy.skip.port": "8080"}, "running", "172.18.0.99"),
 				containerSummary("ctr-b", "/frontend", map[string]string{"proxy.aliases": "app, www", "proxy.*.port": "8080", "proxy.www.host": "www.internal"}, "running", "172.18.0.22"),
@@ -36,9 +38,9 @@ func TestListDesired(t *testing.T) {
 				containerSummary("ctr-d", "/plain", map[string]string{"com.example.role": "noop"}, "running", "172.18.0.24"),
 			},
 			want: []contracts.DesiredRecord{
-				{Hostname: "api", Answer: "edge.example", Source: contracts.SourceObjectRef{Provider: providerRef, ID: "ctr-a", DisplayName: "api"}},
-				{Hostname: "app", Answer: "edge.example", Source: contracts.SourceObjectRef{Provider: providerRef, ID: "ctr-b", DisplayName: "frontend"}},
-				{Hostname: "www", Answer: "www.internal", Source: contracts.SourceObjectRef{Provider: providerRef, ID: "ctr-b", DisplayName: "frontend"}},
+				{Hostname: "api.bar.bz", Answer: "edge.example", Source: contracts.SourceObjectRef{Provider: providerRef, ID: "ctr-a", DisplayName: "api"}},
+				{Hostname: "app.bar.bz", Answer: "edge.example", Source: contracts.SourceObjectRef{Provider: providerRef, ID: "ctr-b", DisplayName: "frontend"}},
+				{Hostname: "www.bar.bz", Answer: "www.internal", Source: contracts.SourceObjectRef{Provider: providerRef, ID: "ctr-b", DisplayName: "frontend"}},
 			},
 		},
 		{
@@ -73,6 +75,7 @@ func TestListDesired(t *testing.T) {
 				ref:         providerRef,
 				endpoint:    tt.endpoint,
 				defaultHost: tt.defaultHost,
+				baseDomain:  tt.baseDomain,
 				client: &fakeDockerClient{
 					host:       tt.endpoint,
 					containers: tt.containers,

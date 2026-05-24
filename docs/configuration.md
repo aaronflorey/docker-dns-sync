@@ -30,10 +30,12 @@ The config is parsed first, then validated, then secret references are resolved 
 | `name` | yes | Human-readable provider name used in logs and state. |
 | `endpoint` | yes | Must start with `unix://` or `tcp://`. |
 | `host_ip` | no | Default answer target when labels do not override it. Must be a valid IP address if set. |
+| `base_domain` | no | Appended to label-derived hostnames so `foo` becomes `foo.example.com`. Existing FQDN labels are left unchanged. |
 
 ### Docker source behavior
 
 - `host_ip` is the preferred default answer target.
+- `base_domain` makes derived hostnames canonical FQDNs before they reach any output.
 - If `host_ip` is empty and the endpoint is remote, the endpoint host is used as the default answer target.
 - If the endpoint is a local socket (`unix://`), no default answer target is inferred.
 - The source watches Docker container and network events and uses them as reconciliation hints.

@@ -10,7 +10,7 @@ import (
 	containertypes "github.com/moby/moby/api/types/container"
 )
 
-func deriveDesiredRecords(provider contracts.ProviderRef, defaultTarget string, container containertypes.Summary) []contracts.DesiredRecord {
+func deriveDesiredRecords(provider contracts.ProviderRef, defaultTarget, baseDomain string, container containertypes.Summary) []contracts.DesiredRecord {
 	if isExcluded(container.Labels) {
 		return nil
 	}
@@ -30,12 +30,13 @@ func deriveDesiredRecords(provider contracts.ProviderRef, defaultTarget string, 
 
 	records := make([]contracts.DesiredRecord, 0, len(aliases))
 	for _, alias := range aliases {
-		hostname := alias.name
+		aliasName := alias.name
+		hostname := qualifyHostname(aliasName, baseDomain)
 		if hostname == "" {
 			continue
 		}
 
-		target := explicitHostOverride(container.Labels, hostname, alias.position)
+		target := explicitHostOverride(container.Labels, aliasName, alias.position)
 		if target == "" {
 			target = answer
 		}
@@ -55,6 +56,23 @@ func deriveDesiredRecords(provider contracts.ProviderRef, defaultTarget string, 
 	})
 
 	return records
+}
+
+func qualifyHostname(hostname, baseDomain string) string {
+	hostname = normalizeName(hostname)
+	if hostname == "" {
+		return ""
+	}
+	if strings.Contains(hostname, ".") {
+		return hostname
+	}
+
+	baseDomain = normalizeName(baseDomain)
+	if baseDomain == "" || hostname == baseDomain || strings.HasSuffix(hostname, "."+baseDomain) {
+		return hostname
+	}
+
+	return hostname + "." + baseDomain
 }
 
 type aliasRef struct {

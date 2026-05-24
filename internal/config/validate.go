@@ -41,6 +41,10 @@ func Validate(cfg Config) error {
 				return fmt.Errorf("sources[%d].host_ip must be a valid IP address", i)
 			}
 		}
+
+		if baseDomain := normalizeDomainName(source.BaseDomain); strings.TrimSpace(source.BaseDomain) != "" && !isValidDomainName(baseDomain) {
+			return fmt.Errorf("sources[%d].base_domain must be a valid domain name", i)
+		}
 	}
 
 	for i, output := range cfg.Outputs {
@@ -117,6 +121,31 @@ func Validate(cfg Config) error {
 	}
 
 	return nil
+}
+
+func normalizeDomainName(value string) string {
+	value = strings.TrimSpace(strings.ToLower(value))
+	return strings.TrimSuffix(value, ".")
+}
+
+func isValidDomainName(value string) bool {
+	if value == "" || strings.HasPrefix(value, ".") || strings.Contains(value, "..") {
+		return false
+	}
+
+	for _, label := range strings.Split(value, ".") {
+		if label == "" || strings.HasPrefix(label, "-") || strings.HasSuffix(label, "-") {
+			return false
+		}
+
+		for _, ch := range label {
+			if (ch < 'a' || ch > 'z') && (ch < '0' || ch > '9') && ch != '-' {
+				return false
+			}
+		}
+	}
+
+	return true
 }
 
 func validateDuration(field string, raw string) error {

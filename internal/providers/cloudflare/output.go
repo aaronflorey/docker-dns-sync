@@ -23,8 +23,8 @@ type Provider struct {
 	client *cloudflare.Client
 
 	zoneName string
-	mu      sync.RWMutex
-	visible map[string]visibleRecordMeta
+	mu       sync.RWMutex
+	visible  map[string]visibleRecordMeta
 }
 
 type visibleRecordMeta struct {
@@ -356,18 +356,8 @@ func normalizeAnswer(answer string) string {
 }
 
 func normalizeVisibleHostname(hostname, zoneName string) string {
-	value := normalizeHostname(hostname)
-	zone := normalizeHostname(zoneName)
-	if zone == "" || value == zone {
-		return value
-	}
-
-	suffix := "." + zone
-	if strings.HasSuffix(value, suffix) {
-		return strings.TrimSuffix(value, suffix)
-	}
-
-	return value
+	_ = zoneName
+	return normalizeHostname(hostname)
 }
 
 func visibleRecordKey(hostname, answer string) string {
