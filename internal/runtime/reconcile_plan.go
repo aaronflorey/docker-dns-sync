@@ -50,16 +50,43 @@ func buildReconcilePlan(output contracts.ProviderRef, desired []contracts.Desire
 	}
 
 	ownedByLineage := make(map[string]state.ManagedRecord)
+	ownedByDisplayLineage := make(map[string][]state.ManagedRecord)
+	ownedByHostname := make(map[string][]state.ManagedRecord)
 	for _, m := range owned.ManagedRecords {
 		if m.Output != output {
 			continue
 		}
 		lineage := ownedLineageKey(output.Type, output.Name, m.Source.Provider.Type, m.Source.Provider.Name, m.Source.ID, m.Hostname)
 		ownedByLineage[lineage] = m
+		displayLineage := ownedDisplayLineageKey(output, m.Source, m.Hostname)
+		ownedByDisplayLineage[displayLineage] = append(ownedByDisplayLineage[displayLineage], m)
+		hostname := normalizeHostname(m.Hostname)
+		ownedByHostname[hostname] = append(ownedByHostname[hostname], m)
 	}
+	matchedOwnedLineages := make(map[string]struct{}, len(ownedByLineage))
 
 	for lineage, d := range desiredByLineage {
-		if ownedRecord, ok := ownedByLineage[lineage]; ok {
+		ownedRecord, ok := ownedByLineage[lineage]
+		if !ok {
+			candidates := ownedByDisplayLineage[ownedDisplayLineageKey(output, d.Source, d.Hostname)]
+			if len(candidates) == 1 {
+				ownedRecord = candidates[0]
+				ok = true
+			}
+		}
+		if !ok {
+			candidates := ownedByHostname[normalizeHostname(d.Hostname)]
+			if len(candidates) == 1 {
+				ownedRecord = candidates[0]
+				ok = true
+			}
+		}
+		if ok {
+			ownedLineage := managedRecordLineageKey(ownedRecord)
+			matchedOwnedLineages[ownedLineage] = struct{}{}
+			if ownedLineage != lineage {
+				pl.Drops = append(pl.Drops, ownedRecord)
+			}
 			hostnameMatches := visibleByHostname[normalizeHostname(d.Hostname)]
 			oldKey := visibleRecordKey(ownedRecord.Hostname, ownedRecord.Answer)
 			newKey := visibleRecordKey(d.Hostname, d.Answer)
@@ -89,6 +116,9 @@ func buildReconcilePlan(output contracts.ProviderRef, desired []contracts.Desire
 	}
 
 	for lineage, m := range ownedByLineage {
+		if _, matched := matchedOwnedLineages[lineage]; matched {
+			continue
+		}
 		if _, keep := desiredByLineage[lineage]; keep {
 			continue
 		}

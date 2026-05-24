@@ -97,8 +97,14 @@ func (p *Provider) Create(ctx context.Context, desired contracts.DesiredRecord) 
 	})
 	if err != nil {
 		if isRecoverableDuplicateRecordError(err) {
-			if _, listErr := p.findVisibleRecord(ctx, desired.Hostname, desired.Answer); listErr == nil {
-				return nil
+			visible, listErr := p.findVisibleHostname(ctx, desired.Hostname)
+			if listErr == nil {
+				if normalizeAnswer(visible.Answer) == normalizeAnswer(desired.Answer) {
+					return nil
+				}
+				if updateErr := p.Update(ctx, visible, desired); updateErr == nil {
+					return nil
+				}
 			}
 		}
 		return fmt.Errorf("create cloudflare dns record: %w", err)
@@ -184,6 +190,25 @@ func (p *Provider) findVisibleRecord(ctx context.Context, hostname, answer strin
 	}
 
 	return meta, nil
+}
+
+func (p *Provider) findVisibleHostname(ctx context.Context, hostname string) (contracts.VisibleRecord, error) {
+	visible, err := p.ListVisible(ctx)
+	if err != nil {
+		return contracts.VisibleRecord{}, err
+	}
+
+	matches := make([]contracts.VisibleRecord, 0, 1)
+	for _, record := range visible {
+		if normalizeHostname(record.Hostname) == normalizeHostname(hostname) {
+			matches = append(matches, record)
+		}
+	}
+	if len(matches) != 1 {
+		return contracts.VisibleRecord{}, fmt.Errorf("cloudflare duplicate create recovery could not uniquely find hostname %s", normalizeHostname(hostname))
+	}
+
+	return matches[0], nil
 }
 
 func isRecoverableDuplicateRecordError(err error) bool {

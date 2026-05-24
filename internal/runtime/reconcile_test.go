@@ -79,6 +79,7 @@ func TestReconcilePlanApply(t *testing.T) {
 		t.Parallel()
 
 		fakeOutput := &reconcileFakeOutput{provider: provider}
+		nextSource := contracts.SourceObjectRef{Provider: source.Provider, ID: "ctr-2", DisplayName: source.DisplayName}
 		owned := state.Snapshot{ManagedRecords: []state.ManagedRecord{{
 			Output:   provider,
 			Source:   source,
@@ -88,7 +89,7 @@ func TestReconcilePlanApply(t *testing.T) {
 
 		result, err := ReconcileOutput(context.Background(), ReconcileInput{
 			Output: fakeOutput,
-			Desired: []contracts.DesiredRecord{{Hostname: "s3.local", Answer: "10.0.0.11", Source: source}},
+			Desired: []contracts.DesiredRecord{{Hostname: "s3.local", Answer: "10.0.0.11", Source: nextSource}},
 			Visible: []contracts.VisibleRecord{{Output: provider, Hostname: "S3.local", Answer: "192.0.2.5"}},
 			Owned:   owned,
 		})
@@ -107,6 +108,84 @@ func TestReconcilePlanApply(t *testing.T) {
 		}
 		if got := len(result.Next.ManagedRecords); got != 1 || result.Next.ManagedRecords[0].Answer != "10.0.0.11" {
 			t.Fatalf("unexpected next managed records: %+v", result.Next.ManagedRecords)
+		}
+		if result.Next.ManagedRecords[0].Source.ID != "ctr-2" {
+			t.Fatalf("expected managed source ID to roll forward, got %+v", result.Next.ManagedRecords[0].Source)
+		}
+	})
+
+	t.Run("preserve owned record when source ID changes but desired record stays the same", func(t *testing.T) {
+		t.Parallel()
+
+		fakeOutput := &reconcileFakeOutput{provider: provider}
+		nextSource := contracts.SourceObjectRef{Provider: source.Provider, ID: "ctr-2", DisplayName: source.DisplayName}
+		owned := state.Snapshot{ManagedRecords: []state.ManagedRecord{{
+			Output:   provider,
+			Source:   source,
+			Hostname: "app.local",
+			Answer:   "10.0.0.10",
+		}}}
+
+		result, err := ReconcileOutput(context.Background(), ReconcileInput{
+			Output:  fakeOutput,
+			Desired: []contracts.DesiredRecord{{Hostname: "app.local", Answer: "10.0.0.10", Source: nextSource}},
+			Visible: []contracts.VisibleRecord{{Output: provider, Hostname: "app.local", Answer: "10.0.0.10"}},
+			Owned:   owned,
+		})
+		if err != nil {
+			t.Fatalf("reconcile output: %v", err)
+		}
+
+		if got := len(fakeOutput.created); got != 0 {
+			t.Fatalf("expected no create calls, got %d", got)
+		}
+		if got := len(fakeOutput.updated); got != 0 {
+			t.Fatalf("expected no update calls, got %d", got)
+		}
+		if got := len(fakeOutput.deleted); got != 0 {
+			t.Fatalf("expected no delete calls, got %d", got)
+		}
+		if got := len(result.Next.ManagedRecords); got != 1 {
+			t.Fatalf("expected 1 managed record, got %d", got)
+		}
+		if result.Next.ManagedRecords[0].Source.ID != "ctr-2" {
+			t.Fatalf("expected managed source ID to roll forward, got %+v", result.Next.ManagedRecords[0].Source)
+		}
+	})
+
+	t.Run("update owned record when source identity changes but hostname stays unique", func(t *testing.T) {
+		t.Parallel()
+
+		fakeOutput := &reconcileFakeOutput{provider: provider}
+		nextSource := contracts.SourceObjectRef{Provider: source.Provider, ID: "ctr-9", DisplayName: "svc-recreated"}
+		owned := state.Snapshot{ManagedRecords: []state.ManagedRecord{{
+			Output:   provider,
+			Source:   source,
+			Hostname: "s3.local",
+			Answer:   "origin.internal",
+		}}}
+
+		result, err := ReconcileOutput(context.Background(), ReconcileInput{
+			Output: fakeOutput,
+			Desired: []contracts.DesiredRecord{{Hostname: "s3.local", Answer: "192.168.1.142", Source: nextSource}},
+			Visible: []contracts.VisibleRecord{{Output: provider, Hostname: "s3.local", Answer: "legacy.internal"}},
+			Owned:   owned,
+		})
+		if err != nil {
+			t.Fatalf("reconcile output: %v", err)
+		}
+
+		if got := len(fakeOutput.created); got != 0 {
+			t.Fatalf("expected no create calls, got %d", got)
+		}
+		if got := len(fakeOutput.updated); got != 1 {
+			t.Fatalf("expected 1 update call, got %d", got)
+		}
+		if got := len(result.Next.ManagedRecords); got != 1 {
+			t.Fatalf("expected 1 managed record, got %d", got)
+		}
+		if result.Next.ManagedRecords[0].Source.DisplayName != "svc-recreated" || result.Next.ManagedRecords[0].Source.ID != "ctr-9" {
+			t.Fatalf("expected managed source identity to roll forward, got %+v", result.Next.ManagedRecords[0].Source)
 		}
 	})
 
