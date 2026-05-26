@@ -64,14 +64,16 @@ func (p *Provider) ListVisible(ctx context.Context) ([]contracts.VisibleRecord, 
 			continue
 		}
 
-		hostname := normalizeVisibleHostname(record.Name, zoneName)
+		hostname := normalizeHostname(record.Name)
 		answer := normalizeAnswer(record.Content)
 		visible = append(visible, contracts.VisibleRecord{
 			Output:   p.ref,
 			Hostname: hostname,
 			Answer:   answer,
 		})
-		nextVisible[visibleRecordKey(hostname, answer)] = visibleRecordMeta{id: record.ID}
+		for _, key := range visibleRecordKeys(hostname, answer, zoneName) {
+			nextVisible[key] = visibleRecordMeta{id: record.ID}
+		}
 	}
 
 	if err := iter.Err(); err != nil {
@@ -198,9 +200,14 @@ func (p *Provider) findVisibleHostname(ctx context.Context, hostname string) (co
 		return contracts.VisibleRecord{}, err
 	}
 
+	zoneName := ""
+	p.mu.RLock()
+	zoneName = p.zoneName
+	p.mu.RUnlock()
+
 	matches := make([]contracts.VisibleRecord, 0, 1)
 	for _, record := range visible {
-		if normalizeHostname(record.Hostname) == normalizeHostname(hostname) {
+		if hostnamesEquivalent(record.Hostname, hostname, zoneName) {
 			matches = append(matches, record)
 		}
 	}
@@ -355,9 +362,58 @@ func normalizeAnswer(answer string) string {
 	return strings.TrimSuffix(value, ".")
 }
 
-func normalizeVisibleHostname(hostname, zoneName string) string {
-	_ = zoneName
-	return normalizeHostname(hostname)
+func relativeVisibleHostname(hostname, zoneName string) string {
+	normalizedHostname := normalizeHostname(hostname)
+	normalizedZone := normalizeHostname(zoneName)
+	if normalizedHostname == "" || normalizedZone == "" || normalizedHostname == normalizedZone {
+		return normalizedHostname
+	}
+
+	zoneSuffix := "." + normalizedZone
+	if !strings.HasSuffix(normalizedHostname, zoneSuffix) {
+		return normalizedHostname
+	}
+
+	// Collapse single-label records within the zone back to their short form so
+	// reconcile keys match desired hostnames created without a base domain.
+	relative := strings.TrimSuffix(normalizedHostname, zoneSuffix)
+	if relative == "" || strings.Contains(relative, ".") {
+		return normalizedHostname
+	}
+
+	return relative
+}
+
+func visibleRecordKeys(hostname, answer, zoneName string) []string {
+	keys := []string{visibleRecordKey(hostname, answer)}
+	relativeHostname := relativeVisibleHostname(hostname, zoneName)
+	if relativeHostname != "" && relativeHostname != normalizeHostname(hostname) {
+		keys = append(keys, visibleRecordKey(relativeHostname, answer))
+	}
+
+	return keys
+}
+
+func hostnamesEquivalent(left, right, zoneName string) bool {
+	normalizedLeft := normalizeHostname(left)
+	normalizedRight := normalizeHostname(right)
+	if normalizedLeft == normalizedRight {
+		return true
+	}
+
+	normalizedZone := normalizeHostname(zoneName)
+	if normalizedZone == "" {
+		return false
+	}
+
+	qualify := func(hostname string) string {
+		if hostname == "" || hostname == normalizedZone || strings.Contains(hostname, ".") {
+			return hostname
+		}
+		return hostname + "." + normalizedZone
+	}
+
+	return qualify(normalizedLeft) == qualify(normalizedRight)
 }
 
 func visibleRecordKey(hostname, answer string) string {

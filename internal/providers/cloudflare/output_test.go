@@ -69,6 +69,55 @@ func TestCloudflareListVisibleCachesRecordMetadata(t *testing.T) {
 	}
 }
 
+func TestCloudflareListVisibleKeepsFQDNAndCachesSingleLabelAlias(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assertBearerToken(t, r)
+		if !strings.HasSuffix(r.URL.Path, "/zones/zone-123/dns_records") {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if r.URL.Query().Get("page") == "2" {
+			writeCloudflareJSON(t, w, map[string]any{
+				"result":      []map[string]any{},
+				"success":     true,
+				"errors":      []any{},
+				"messages":    []any{},
+				"result_info": map[string]any{"page": 2, "per_page": 100},
+			})
+			return
+		}
+
+		writeCloudflareJSON(t, w, map[string]any{
+			"result":      []map[string]any{{"id": "rec-a", "type": "A", "name": "agentsview.example.com", "content": "192.168.1.142"}},
+			"success":     true,
+			"errors":      []any{},
+			"messages":    []any{},
+			"result_info": map[string]any{"page": 1, "per_page": 100},
+		})
+	}))
+	defer server.Close()
+
+	provider := newTestProvider(server.URL)
+	provider.zoneName = "example.com"
+	visible, err := provider.ListVisible(context.Background())
+	if err != nil {
+		t.Fatalf("ListVisible returned error: %v", err)
+	}
+	if len(visible) != 1 {
+		t.Fatalf("expected 1 visible record, got %d", len(visible))
+	}
+	if visible[0].Hostname != "agentsview.example.com" {
+		t.Fatalf("expected fqdn hostname, got %+v", visible[0])
+	}
+	if meta, ok := provider.lookupVisibleRecord("agentsview.example.com", "192.168.1.142"); !ok || meta.id != "rec-a" {
+		t.Fatalf("expected cached record metadata for fqdn key, got %+v ok=%v", meta, ok)
+	}
+	if meta, ok := provider.lookupVisibleRecord("agentsview", "192.168.1.142"); !ok || meta.id != "rec-a" {
+		t.Fatalf("expected cached record metadata for short alias key, got %+v ok=%v", meta, ok)
+	}
+}
+
 func TestCloudflareListVisibleKeepsFQDN(t *testing.T) {
 	t.Parallel()
 
@@ -213,6 +262,64 @@ func TestCloudflareCreateRecoversDuplicateRecord(t *testing.T) {
 	}
 }
 
+func TestCloudflareCreateRecoversDuplicateRecordForSingleLabelHostname(t *testing.T) {
+	t.Parallel()
+
+	var listCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assertBearerToken(t, r)
+		if !strings.HasSuffix(r.URL.Path, "/zones/zone-123/dns_records") {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+
+		switch r.Method {
+		case http.MethodPost:
+			w.WriteHeader(http.StatusBadRequest)
+			writeCloudflareJSON(t, w, map[string]any{
+				"result":   nil,
+				"success":  false,
+				"errors":   []map[string]any{{"code": 81058, "message": "An identical record already exists."}},
+				"messages": []any{},
+			})
+		case http.MethodGet:
+			listCalls.Add(1)
+			if r.URL.Query().Get("page") == "2" {
+				writeCloudflareJSON(t, w, map[string]any{
+					"result":      []map[string]any{},
+					"success":     true,
+					"errors":      []any{},
+					"messages":    []any{},
+					"result_info": map[string]any{"page": 2, "per_page": 100},
+				})
+				return
+			}
+			writeCloudflareJSON(t, w, map[string]any{
+				"result":      []map[string]any{{"id": "rec-a", "type": "A", "name": "agentsview.example.com", "content": "192.168.1.142"}},
+				"success":     true,
+				"errors":      []any{},
+				"messages":    []any{},
+				"result_info": map[string]any{"page": 1, "per_page": 100},
+			})
+		default:
+			t.Fatalf("unexpected method: %s", r.Method)
+		}
+	}))
+	defer server.Close()
+
+	provider := newTestProvider(server.URL)
+	provider.zoneName = "example.com"
+	err := provider.Create(context.Background(), contracts.DesiredRecord{Hostname: "agentsview", Answer: "192.168.1.142"})
+	if err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+	if got := listCalls.Load(); got != 2 {
+		t.Fatalf("expected two recovery list calls across pagination, got %d", got)
+	}
+	if meta, ok := provider.lookupVisibleRecord("agentsview", "192.168.1.142"); !ok || meta.id != "rec-a" {
+		t.Fatalf("expected cached record metadata after recovery, got %+v ok=%v", meta, ok)
+	}
+}
+
 func TestCloudflareCreateRecoversValidationErrorChainDuplicateRecord(t *testing.T) {
 	t.Parallel()
 
@@ -328,7 +435,7 @@ func TestCloudflareCreateRecoversSameHostCNAMEConflictWhenVisibleRecordMatches(t
 	if got := listCalls.Load(); got != 2 {
 		t.Fatalf("expected two recovery list calls across pagination, got %d", got)
 	}
-	if meta, ok := provider.lookupVisibleRecord("s3.example.com", "origin.internal"); !ok || meta.id != "rec-cname" {
+	if meta, ok := provider.lookupVisibleRecord("s3", "origin.internal"); !ok || meta.id != "rec-cname" {
 		t.Fatalf("expected cached record metadata after recovery, got %+v ok=%v", meta, ok)
 	}
 }
@@ -402,7 +509,7 @@ func TestCloudflareCreateTakesOverUniqueHostnameConflictByUpdatingRecord(t *test
 	if got := putCalls.Load(); got != 1 {
 		t.Fatalf("expected one takeover update call, got %d", got)
 	}
-	if meta, ok := provider.lookupVisibleRecord("s3.example.com", "origin.internal"); !ok || meta.id != "rec-cname" {
+	if meta, ok := provider.lookupVisibleRecord("s3", "origin.internal"); !ok || meta.id != "rec-cname" {
 		t.Fatalf("expected cached record metadata after recovery, got %+v ok=%v", meta, ok)
 	}
 }

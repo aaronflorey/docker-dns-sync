@@ -96,9 +96,9 @@ func Validate(cfg Config) error {
 
 	level := strings.ToLower(strings.TrimSpace(cfg.Logging.Level))
 	switch level {
-	case "debug", "info", "warn", "error":
+	case "trace", "debug", "info", "warn", "error":
 	default:
-		return errors.New("logging.level must be one of debug, info, warn, error")
+		return errors.New("logging.level must be one of trace, debug, info, warn, error")
 	}
 
 	format := strings.ToLower(strings.TrimSpace(cfg.Logging.Format))

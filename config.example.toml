@@ -21,6 +21,7 @@ password_ref = "ENV:ADGUARD_PASSWORD"
 path = "/var/lib/docker-dns-sync/state.json"
 
 [logging]
+# Supported levels: trace, debug, info, warn, error.
 level = "info"
 format = "json"
 
