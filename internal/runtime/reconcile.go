@@ -67,6 +67,7 @@ func reconcileOutput(ctx context.Context, input ReconcileInput) (ReconcileResult
 	}
 
 	plan := buildReconcilePlan(input.Output.Provider(), input.Desired, input.Visible, input.Owned)
+	logReconcilePlan(ctx, input, plan)
 	if len(plan.Ambiguities) > 0 {
 		return ReconcileResult{Ambiguities: plan.Ambiguities}, false, plan.Ambiguities[0]
 	}
@@ -114,4 +115,46 @@ func ReconcileAndPersist(ctx context.Context, store *state.Store, input Reconcil
 	}
 
 	return result, nil
+}
+
+func logReconcilePlan(ctx context.Context, input ReconcileInput, plan reconcilePlan) {
+	if input.Logger == nil {
+		return
+	}
+
+	ownedCount := 0
+	for _, record := range input.Owned.ManagedRecords {
+		if record.Output == input.Output.Provider() {
+			ownedCount++
+		}
+	}
+
+	logDebug(ctx, input.Logger, "built reconcile plan",
+		"output", providerKey(input.Output.Provider()),
+		"desired", len(input.Desired),
+		"visible", len(input.Visible),
+		"owned", ownedCount,
+		"creates", len(plan.Creates),
+		"updates", len(plan.Updates),
+		"deletes", len(plan.Deletes),
+		"drops", len(plan.Drops),
+		"next_managed", len(plan.NextManaged),
+		"ambiguities", len(plan.Ambiguities),
+	)
+
+	for _, record := range plan.Creates {
+		logTrace(ctx, input.Logger, "planned record create", "output", providerKey(input.Output.Provider()), "hostname", record.Hostname, "answer", record.Answer, "source_id", record.Source.ID)
+	}
+	for _, record := range plan.Updates {
+		logTrace(ctx, input.Logger, "planned record update", "output", providerKey(input.Output.Provider()), "from_hostname", record.From.Hostname, "from_answer", record.From.Answer, "to_hostname", record.To.Hostname, "to_answer", record.To.Answer, "source_id", record.To.Source.ID)
+	}
+	for _, record := range plan.Deletes {
+		logTrace(ctx, input.Logger, "planned record delete", "output", providerKey(input.Output.Provider()), "hostname", record.Visible.Hostname, "answer", record.Visible.Answer, "source_id", record.Managed.Source.ID)
+	}
+	for _, record := range plan.Drops {
+		logTrace(ctx, input.Logger, "planned managed-state drop", "output", providerKey(input.Output.Provider()), "hostname", record.Hostname, "answer", record.Answer, "source_id", record.Source.ID)
+	}
+	for _, ambiguity := range plan.Ambiguities {
+		logDebug(ctx, input.Logger, "detected visible record ambiguity", "output", ambiguity.Output, "key", ambiguity.Key, "count", ambiguity.Count)
+	}
 }

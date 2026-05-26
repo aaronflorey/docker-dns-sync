@@ -76,6 +76,12 @@ func TestValidateRuntimeAndCredentialFields(t *testing.T) {
 			wantErr: "logging.level must be one of",
 		},
 		{
+			name: "trace log level is valid",
+			mutate: func(cfg *Config) {
+				cfg.Logging.Level = "trace"
+			},
+		},
+		{
 			name: "invalid retry duration",
 			mutate: func(cfg *Config) {
 				cfg.Retry.MaxInterval = "later"
@@ -141,6 +147,12 @@ func TestValidateRuntimeAndCredentialFields(t *testing.T) {
 			tt.mutate(&cfg)
 
 			err := Validate(cfg)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("expected config to validate, got %v", err)
+				}
+				return
+			}
 			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 				t.Fatalf("expected error containing %q, got %v", tt.wantErr, err)
 			}

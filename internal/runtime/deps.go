@@ -12,6 +12,8 @@ import (
 	"github.com/aaronflorey/docker-dns-sync/internal/config"
 )
 
+const LevelTrace slog.Level = slog.LevelDebug - 4
+
 type RetryPolicy struct {
 	InitialInterval time.Duration
 	MaxInterval     time.Duration
@@ -55,6 +57,8 @@ func NewRuntimeDeps(cfg config.Config) (RuntimeDeps, error) {
 
 func parseLogLevel(raw string) (slog.Level, error) {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "trace":
+		return LevelTrace, nil
 	case "debug":
 		return slog.LevelDebug, nil
 	case "info":
@@ -64,7 +68,7 @@ func parseLogLevel(raw string) (slog.Level, error) {
 	case "error":
 		return slog.LevelError, nil
 	default:
-		return 0, fmt.Errorf("logging.level must be one of debug, info, warn, error")
+		return 0, fmt.Errorf("logging.level must be one of trace, debug, info, warn, error")
 	}
 }
 

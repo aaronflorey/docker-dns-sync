@@ -64,7 +64,7 @@ func (a *App) Run(ctx context.Context) error {
 	a.sources = sources
 	a.outputs = wrapOutputs(outputs, deps)
 
-	deps.Logger.Info("starting docker-dns-sync runtime", "sources", len(sources), "outputs", len(outputs), "state_path", resolved.State.Path)
+	deps.Logger.Info("starting docker-dns-sync runtime", "sources", len(sources), "outputs", len(outputs), "state_path", resolved.State.Path, "log_level", resolved.Logging.Level)
 	if err := a.reconcile(ctx, "startup"); err != nil {
 		return err
 	}
@@ -142,6 +142,7 @@ func (a *App) reconcileOnce(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("load owned state: %w", err)
 	}
+	logDebug(ctx, a.deps.Logger, "loaded owned state snapshot", "records", len(owned.ManagedRecords))
 
 	desired := make([]contracts.DesiredRecord, 0)
 	for i, source := range a.sources {
@@ -149,13 +150,22 @@ func (a *App) reconcileOnce(ctx context.Context) error {
 		if err != nil {
 			return sourceListError{sourceIndex: i, provider: source.Provider(), err: err}
 		}
+		logDebug(ctx, a.deps.Logger, "listed desired records from source", "source", providerKey(source.Provider()), "records", len(records))
+		for _, record := range records {
+			logTrace(ctx, a.deps.Logger, "desired record discovered", "source", providerKey(source.Provider()), "source_id", record.Source.ID, "display_name", record.Source.DisplayName, "hostname", record.Hostname, "answer", record.Answer)
+		}
 		desired = append(desired, records...)
 	}
+	logDebug(ctx, a.deps.Logger, "collected desired records across sources", "records", len(desired))
 
 	for i, output := range a.outputs {
 		visible, err := output.ListVisible(ctx)
 		if err != nil {
 			return outputListError{outputIndex: i, provider: output.Provider(), err: err}
+		}
+		logDebug(ctx, a.deps.Logger, "listed visible records from output", "output", providerKey(output.Provider()), "records", len(visible))
+		for _, record := range visible {
+			logTrace(ctx, a.deps.Logger, "visible record discovered", "output", providerKey(output.Provider()), "hostname", record.Hostname, "answer", record.Answer)
 		}
 
 		result, err := ReconcileAndPersist(ctx, a.store, ReconcileInput{
@@ -252,6 +262,7 @@ func (a *App) runSteadyState(ctx context.Context) error {
 			return ctx.Err()
 		case event := <-events:
 			if event.hint {
+				logDebug(ctx, a.deps.Logger, "source watch emitted reconcile hint", "source", providerKey(a.sources[event.sourceIndex].Provider()))
 				reconnectDelays[event.sourceIndex] = a.deps.Retry.InitialInterval
 				if err := a.reconcile(ctx, "watch_hint"); err != nil {
 					return err
@@ -261,6 +272,7 @@ func (a *App) runSteadyState(ctx context.Context) error {
 
 			if event.reconnect {
 				reconnectPending[event.sourceIndex] = false
+				logDebug(ctx, a.deps.Logger, "restarting source watch after backoff", "source", providerKey(a.sources[event.sourceIndex].Provider()))
 				a.startSourceWatch(ctx, event.sourceIndex, watchers[event.sourceIndex], events)
 				if err := a.reconcile(ctx, "watch_reconnect_repair"); err != nil {
 					return err
@@ -324,6 +336,7 @@ func (a *App) startSourceWatch(ctx context.Context, sourceIndex int, source cont
 					stream.Hints = nil
 					continue
 				}
+				logTrace(ctx, a.deps.Logger, "source watch hint received", "source", providerKey(provider))
 				select {
 				case events <- sourceWatchEvent{sourceIndex: sourceIndex, hint: true}:
 				case <-ctx.Done():
@@ -400,6 +413,20 @@ func (o loggingOutput) Delete(ctx context.Context, visible contracts.VisibleReco
 
 func providerKey(provider contracts.ProviderRef) string {
 	return provider.Type + "/" + provider.Name
+}
+
+func logDebug(ctx context.Context, logger *slog.Logger, msg string, args ...any) {
+	if logger == nil || !logger.Enabled(ctx, slog.LevelDebug) {
+		return
+	}
+	logger.DebugContext(ctx, msg, args...)
+}
+
+func logTrace(ctx context.Context, logger *slog.Logger, msg string, args ...any) {
+	if logger == nil || !logger.Enabled(ctx, LevelTrace) {
+		return
+	}
+	logger.Log(ctx, LevelTrace, msg, args...)
 }
 
 func (a *App) Deps() RuntimeDeps {
