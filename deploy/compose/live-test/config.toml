@@ -14,7 +14,7 @@ password_ref = "ENV:ADGUARD_PASSWORD"
 type = "cloudflare"
 name = "cloudflare"
 enabled = true
-zone_id = "02f23baa8f329847f0d53183eac994b8"
+zone_id = "123456789"
 api_key_ref = "ENV:CLOUDFLARE_API_KEY"
 
 [state]
