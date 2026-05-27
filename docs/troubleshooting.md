@@ -16,6 +16,23 @@ The CLI has one required flag and does not use built-in defaults.
 
 Run the daemon with `-config /path/to/config.toml`.
 
+## Config file is missing, unreadable, or malformed
+
+**Symptoms**
+
+- `stat config file: ...`
+- `decode config file: ...`
+
+**Cause**
+
+The path does not exist, cannot be read, or the TOML is invalid. The repository includes `testdata/config/malformed.toml` as a parse-failure example.
+
+**Fix**
+
+- Confirm the path exists and is readable by the process.
+- Start from `testdata/config/example.toml`, `config.example.toml`, or another known-good sample.
+- Validate the TOML syntax before restart.
+
 ## Invalid Docker endpoint scheme
 
 **Symptom**
@@ -55,7 +72,7 @@ The config requires one credential source only, and `ENV:` references must resol
 **Symptom**
 
 ```text
-unsupported state snapshot version 1
+unsupported state snapshot version <n>
 ```
 
 or a state load/decode error.
@@ -68,6 +85,7 @@ The snapshot format is versioned and the file may be stale, corrupted, or hand-e
 
 - Point `state.path` at a fresh writable file.
 - If the old file matters, back it up before replacing it.
+- Deleting the file is safe; the store recreates an empty snapshot on startup when the path is missing.
 
 ## Ambiguous visible record collisions
 

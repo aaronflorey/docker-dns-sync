@@ -12,7 +12,11 @@ The persisted snapshot lives at `state.path` and is JSON encoded.
   "managed_records": [
     {
       "output": { "Type": "adguard", "Name": "primary-adguard" },
-      "source": { "Provider": { "Type": "docker", "Name": "local-docker" }, "ID": "...", "DisplayName": "whoami" },
+      "source": {
+        "Provider": { "Type": "docker", "Name": "local-docker" },
+        "ID": "...",
+        "DisplayName": "whoami"
+      },
       "hostname": "whoami.test",
       "answer": "127.0.0.1",
       "last_applied_at": "2026-05-23T00:00:00Z"
@@ -20,6 +24,9 @@ The persisted snapshot lives at `state.path` and is JSON encoded.
   ]
 }
 ```
+
+The top-level snapshot fields and `ManagedRecord` fields are snake_case because they define explicit JSON tags.
+The nested provider/source reference structs use Go's default exported field names because they do not define JSON tags.
 
 ### Fields
 
@@ -45,3 +52,4 @@ The persisted snapshot lives at `state.path` and is JSON encoded.
 - `internal/state/model.go`
 - `internal/state/store.go`
 - `internal/runtime/reconcile.go`
+- `internal/runtime/reconcile_apply.go`

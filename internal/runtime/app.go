@@ -66,12 +66,19 @@ func (a *App) Run(ctx context.Context) error {
 
 	deps.Logger.Info("starting docker-dns-sync runtime", "sources", len(sources), "outputs", len(outputs), "state_path", resolved.State.Path, "log_level", resolved.Logging.Level)
 	if err := a.reconcile(ctx, "startup"); err != nil {
+		if errors.Is(err, context.Canceled) {
+			deps.Logger.Info("runtime cancelled", "reason", ctx.Err())
+			return nil
+		}
 		return err
 	}
-	if err := a.runSteadyState(ctx); err != nil && !errors.Is(err, context.Canceled) {
+	if err := a.runSteadyState(ctx); err != nil {
+		if errors.Is(err, context.Canceled) {
+			deps.Logger.Info("runtime cancelled", "reason", ctx.Err())
+			return nil
+		}
 		return err
 	}
-	deps.Logger.Info("runtime cancelled", "reason", ctx.Err())
 	return nil
 }
 
