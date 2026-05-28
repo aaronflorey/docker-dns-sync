@@ -8,7 +8,7 @@
 
 ## Installation
 
-- Install from Homebrew with `brew install aaronflorey/tap/docker-dns-sync`.
+- Install from Homebrew with `brew install --cask aaronflorey/tap/docker-dns-sync`.
 - Download the latest release archive for your platform from GitHub Releases and place `docker-dns-sync` on your `PATH`.
 - Build from source with `mise install && mise exec -- go build -o bin/docker-dns-sync ./cmd/docker-dns-sync`.
 - Pull the release container image from `ghcr.io/aaronflorey/docker-dns-sync:<tag>`.
@@ -55,7 +55,7 @@ Use `password_ref = "ENV:ADGUARD_PASSWORD"` instead of embedding credentials in 
 - Merging the release PR creates a `vX.Y.Z` tag and GitHub release.
 - Release publishing uploads macOS and Linux archives plus checksums.
 - The same tagged GoReleaser run publishes multi-arch container images to GHCR.
-- The same tagged GoReleaser run updates the Homebrew formula in `aaronflorey/homebrew-tap`.
+- The same tagged GoReleaser run updates the Homebrew cask in `aaronflorey/homebrew-tap`.
 - The release workflow requires a `HOMEBREW_TAP_GITHUB_TOKEN` secret with push access to `aaronflorey/homebrew-tap`.
 
 ## Host Binary With systemd
@@ -112,7 +112,8 @@ Notes:
 - `testdata/config/docker-container.toml` - env-ref based Docker container config for `/var/run/docker.sock` plus network-reachable AdGuard.
 - `testdata/config/socket-proxy.toml` - env-ref based TCP proxy or remote Docker example config.
 - `deploy/systemd/docker-dns-sync.service` - starting point for host deployment.
-- `Dockerfile` - container build for Docker deployment.
+- `Dockerfile` - local container build for Docker deployment.
+- `Dockerfile.release` - GoReleaser container build for published multi-arch images.
 
 ## Contributing
 

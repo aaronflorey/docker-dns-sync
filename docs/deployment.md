@@ -29,13 +29,15 @@ The image defaults to `ghcr.io/aaronflorey/docker-dns-sync:latest` unless `DOCKE
 
 `Dockerfile` builds a static binary on Go 1.26.3 and runs it from `gcr.io/distroless/static-debian12`.
 
+`Dockerfile.release` is the GoReleaser-only image definition for published multi-arch images. It copies the prebuilt binary from GoReleaser's per-platform build context instead of compiling inside the image build.
+
 ### Release images and archives
 
 `.goreleaser.yaml` publishes:
 
 - Linux and macOS tarballs
 - multi-arch GHCR images
-- a Homebrew formula update
+- a Homebrew cask update
 
 See `.github/workflows/release.yaml` for the publishing workflow.
 
