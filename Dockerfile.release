@@ -1,0 +1,9 @@
+FROM gcr.io/distroless/static-debian12
+
+WORKDIR /
+
+ARG TARGETPLATFORM
+COPY $TARGETPLATFORM/docker-dns-sync /usr/local/bin/docker-dns-sync
+
+ENTRYPOINT ["/usr/local/bin/docker-dns-sync"]
+CMD ["-config", "/etc/docker-dns-sync/config.toml"]

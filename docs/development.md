@@ -35,6 +35,8 @@ The CI workflow runs:
 - `goreleaser ... check`
 - `docker build -t docker-dns-sync-ci .`
 
+The root `Dockerfile` stays optimized for local `docker build ...` workflows. `Dockerfile.release` is the release-only image definition used by GoReleaser's `dockers_v2` pipeline, which copies prebuilt artifacts from the GoReleaser build context.
+
 See `.github/workflows/ci.yaml`.
 
 ## Notes
