@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/aaronflorey/docker-dns-sync/internal/config"
@@ -166,6 +167,7 @@ func (a *App) reconcileOnce(ctx context.Context) error {
 	logDebug(ctx, a.deps.Logger, "collected desired records across sources", "records", len(desired))
 
 	for i, output := range a.outputs {
+		outputDesired := filterDesiredForOutput(desired, output.Provider())
 		visible, err := output.ListVisible(ctx)
 		if err != nil {
 			return outputListError{outputIndex: i, provider: output.Provider(), err: err}
@@ -177,7 +179,7 @@ func (a *App) reconcileOnce(ctx context.Context) error {
 
 		result, err := ReconcileAndPersist(ctx, a.store, ReconcileInput{
 			Output:  output,
-			Desired: desired,
+			Desired: outputDesired,
 			Visible: visible,
 			Owned:   owned,
 			Logger:  a.deps.Logger,
@@ -189,6 +191,23 @@ func (a *App) reconcileOnce(ctx context.Context) error {
 		owned = result.Next
 	}
 	return nil
+}
+
+func filterDesiredForOutput(desired []contracts.DesiredRecord, output contracts.ProviderRef) []contracts.DesiredRecord {
+	if len(desired) == 0 {
+		return nil
+	}
+
+	filtered := make([]contracts.DesiredRecord, 0, len(desired))
+	outputType := strings.TrimSpace(strings.ToLower(output.Type))
+	for _, record := range desired {
+		if record.Output != "" && strings.TrimSpace(strings.ToLower(record.Output)) != outputType {
+			continue
+		}
+		filtered = append(filtered, record)
+	}
+
+	return filtered
 }
 
 type sourceWatchEvent struct {

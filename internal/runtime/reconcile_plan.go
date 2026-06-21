@@ -122,11 +122,6 @@ func buildReconcilePlan(output contracts.ProviderRef, desired []contracts.Desire
 		if _, keep := desiredByLineage[lineage]; keep {
 			continue
 		}
-		key := visibleRecordKey(m.Hostname, m.Answer)
-		if len(visibleByKey[key]) == 1 {
-			pl.Deletes = append(pl.Deletes, reconcileDeleteCall{Visible: visibleByKey[key][0], Managed: m})
-			continue
-		}
 		pl.Drops = append(pl.Drops, m)
 	}
 

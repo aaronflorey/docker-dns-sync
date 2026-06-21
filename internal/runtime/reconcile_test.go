@@ -189,7 +189,7 @@ func TestReconcilePlanApply(t *testing.T) {
 		}
 	})
 
-	t.Run("delete stale owned records", func(t *testing.T) {
+	t.Run("drop stale owned records without deleting remote dns", func(t *testing.T) {
 		t.Parallel()
 
 		fakeOutput := &reconcileFakeOutput{provider: provider}
@@ -200,7 +200,7 @@ func TestReconcilePlanApply(t *testing.T) {
 			Answer:   "10.0.0.12",
 		}}}
 
-		_, err := ReconcileOutput(context.Background(), ReconcileInput{
+		result, err := ReconcileOutput(context.Background(), ReconcileInput{
 			Output:  fakeOutput,
 			Desired: nil,
 			Visible: []contracts.VisibleRecord{{Output: provider, Hostname: "old.local", Answer: "10.0.0.12"}},
@@ -210,8 +210,11 @@ func TestReconcilePlanApply(t *testing.T) {
 			t.Fatalf("reconcile output: %v", err)
 		}
 
-		if got := len(fakeOutput.deleted); got != 1 {
-			t.Fatalf("expected 1 delete call, got %d", got)
+		if got := len(fakeOutput.deleted); got != 0 {
+			t.Fatalf("expected no delete calls, got %d", got)
+		}
+		if got := len(result.Next.ManagedRecords); got != 0 {
+			t.Fatalf("expected stale owned state to be dropped, got %d managed records", got)
 		}
 	})
 
@@ -334,6 +337,26 @@ func TestPreserveManualRecords(t *testing.T) {
 	}
 	if got := len(fakeOutput.deleted); got != 0 {
 		t.Fatalf("expected non-destructive duplicate handling, got %d deletes", got)
+	}
+}
+
+func TestFilterDesiredForOutput(t *testing.T) {
+	t.Parallel()
+
+	provider := contracts.ProviderRef{Type: "adguard", Name: "primary"}
+	source := contracts.SourceObjectRef{Provider: contracts.ProviderRef{Type: "docker", Name: "local"}, ID: "ctr-1", DisplayName: "svc"}
+	desired := []contracts.DesiredRecord{
+		{Hostname: "all.local", Answer: "10.0.0.10", Source: source},
+		{Hostname: "adguard.local", Answer: "10.0.0.11", Source: source, Output: "adguard"},
+		{Hostname: "cloudflare.local", Answer: "10.0.0.12", Source: source, Output: "cloudflare"},
+	}
+
+	filtered := filterDesiredForOutput(desired, provider)
+	if got := len(filtered); got != 2 {
+		t.Fatalf("expected 2 filtered records, got %d (%+v)", got, filtered)
+	}
+	if filtered[0].Hostname != "all.local" || filtered[1].Hostname != "adguard.local" {
+		t.Fatalf("unexpected filtered records: %+v", filtered)
 	}
 }
 

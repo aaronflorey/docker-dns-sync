@@ -7,11 +7,14 @@ The Docker provider uses the Moby client with API version negotiation. It reads 
 ### Label contract
 
 - `proxy.aliases` defines aliases.
+- `proxy.dns` gates DNS output selection: unset or `true` targets all outputs, `false` disables DNS for that container, and values like `adguard` or `cloudflare` target a single output type.
 - `proxy.<alias>.port` declares a named alias.
 - `proxy.#<n>.port` and `proxy.*.port` support indexed and wildcard ports.
 - `proxy.<alias>.host`, `proxy.#<n>.host`, and `proxy.*.host` override the answer target.
 - `proxy.exclude=true` opts a container out.
 - If `base_domain` is configured on the source, bare aliases are expanded to FQDNs before reconciliation.
+
+When labels stop producing a record, docker-dns-sync drops ownership from its local state and leaves the visible DNS record untouched. That keeps the daemon from deleting a record an operator may have taken over manually, but it also means label changes do not perform remote cleanup.
 
 ## AdGuard Home output
 

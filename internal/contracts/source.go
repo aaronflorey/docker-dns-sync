@@ -17,6 +17,7 @@ type DesiredRecord struct {
 	Hostname string
 	Answer   string
 	Source   SourceObjectRef
+	Output   string
 }
 
 type SourceWatch struct {
