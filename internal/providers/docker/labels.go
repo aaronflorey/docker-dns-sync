@@ -15,6 +15,11 @@ func deriveDesiredRecords(provider contracts.ProviderRef, defaultTarget, baseDom
 		return nil
 	}
 
+	outputType, include := dnsOutputType(container.Labels)
+	if !include {
+		return nil
+	}
+
 	aliases := collectAliases(container)
 	if len(aliases) == 0 {
 		return nil
@@ -48,6 +53,7 @@ func deriveDesiredRecords(provider contracts.ProviderRef, defaultTarget, baseDom
 			Hostname: hostname,
 			Answer:   normalizeAnswerTarget(target),
 			Source:   source,
+			Output:   outputType,
 		})
 	}
 
@@ -188,6 +194,18 @@ func supportedNamedPortAlias(key string) (string, bool) {
 func isExcluded(labels map[string]string) bool {
 	value := strings.TrimSpace(strings.ToLower(labels["proxy.exclude"]))
 	return value == "true"
+}
+
+func dnsOutputType(labels map[string]string) (string, bool) {
+	value := strings.TrimSpace(strings.ToLower(labels["proxy.dns"]))
+	switch value {
+	case "", "true":
+		return "", true
+	case "false":
+		return "", false
+	default:
+		return value, true
+	}
 }
 
 func containerDisplayName(container containertypes.Summary) string {

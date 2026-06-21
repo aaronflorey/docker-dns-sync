@@ -107,6 +107,45 @@ func TestDockerLabelsSubset(t *testing.T) {
 				{Hostname: "app", Answer: "192.168.1.50", Source: contracts.SourceObjectRef{Provider: provider, ID: "ctr-4b", DisplayName: "svc"}},
 			},
 		},
+		{
+			name:          "proxy dns false opts out of dns",
+			defaultTarget: "192.168.1.50",
+			container: containerSummary("ctr-4c", "/svc", map[string]string{
+				"proxy.dns":      "false",
+				"proxy.aliases":  "app",
+				"proxy.app.port": "8080",
+			}, "running", "172.18.0.31"),
+			want: nil,
+		},
+		{
+			name:          "proxy dns true keeps default behavior",
+			defaultTarget: "192.168.1.50",
+			container: containerSummary("ctr-4d", "/svc", map[string]string{
+				"proxy.dns":      "true",
+				"proxy.aliases":  "app",
+				"proxy.app.port": "8080",
+			}, "running", "172.18.0.31"),
+			want: []contracts.DesiredRecord{{
+				Hostname: "app",
+				Answer:   "192.168.1.50",
+				Source:   contracts.SourceObjectRef{Provider: provider, ID: "ctr-4d", DisplayName: "svc"},
+			}},
+		},
+		{
+			name:          "proxy dns targets a specific output type",
+			defaultTarget: "192.168.1.50",
+			container: containerSummary("ctr-4e", "/svc", map[string]string{
+				"proxy.dns":      "cloudflare",
+				"proxy.aliases":  "app",
+				"proxy.app.port": "8080",
+			}, "running", "172.18.0.31"),
+			want: []contracts.DesiredRecord{{
+				Hostname: "app",
+				Answer:   "192.168.1.50",
+				Source:   contracts.SourceObjectRef{Provider: provider, ID: "ctr-4e", DisplayName: "svc"},
+				Output:   "cloudflare",
+			}},
+		},
 	}
 
 	for _, tt := range tests {

@@ -64,6 +64,17 @@ func TestListDesired(t *testing.T) {
 				{Hostname: "edge", Answer: "192.168.1.50", Source: contracts.SourceObjectRef{Provider: providerRef, ID: "ctr-host-ip", DisplayName: "edge"}},
 			},
 		},
+		{
+			name:        "passes through proxy dns output targeting",
+			endpoint:    "unix:///var/run/docker.sock",
+			defaultHost: "192.168.1.50",
+			containers: []containertypes.Summary{
+				containerSummary("ctr-targeted", "/edge", map[string]string{"proxy.dns": "adguard", "proxy.aliases": "edge", "proxy.edge.port": "8080"}, "running", "172.18.0.44"),
+			},
+			want: []contracts.DesiredRecord{
+				{Hostname: "edge", Answer: "192.168.1.50", Source: contracts.SourceObjectRef{Provider: providerRef, ID: "ctr-targeted", DisplayName: "edge"}, Output: "adguard"},
+			},
+		},
 	}
 
 	for _, tt := range tests {

@@ -69,6 +69,52 @@ func TestAppRunStartupReconcilesAndPersistsState(t *testing.T) {
 	}
 }
 
+func TestAppReconcileOnceFiltersDesiredRecordsPerOutput(t *testing.T) {
+	t.Parallel()
+
+	adguardProvider := contracts.ProviderRef{Type: "adguard", Name: "primary"}
+	cloudflareProvider := contracts.ProviderRef{Type: "cloudflare", Name: "primary"}
+	sourceRef := contracts.SourceObjectRef{Provider: contracts.ProviderRef{Type: "docker", Name: "local"}, ID: "ctr-1", DisplayName: "svc"}
+	adguardOutput := &startupOutputStub{provider: adguardProvider}
+	cloudflareOutput := &startupOutputStub{provider: cloudflareProvider}
+	statePath := filepath.Join(t.TempDir(), "state.json")
+
+	store, err := state.NewStore(statePath)
+	if err != nil {
+		t.Fatalf("create state store: %v", err)
+	}
+
+	app := New(testRuntimeConfig(statePath))
+	app.store = store
+	app.sources = []contracts.Source{&startupSourceStub{provider: sourceRef.Provider, desired: []contracts.DesiredRecord{
+		{Hostname: "shared.local", Answer: "10.0.0.10", Source: sourceRef},
+		{Hostname: "adguard.local", Answer: "10.0.0.11", Source: sourceRef, Output: "adguard"},
+		{Hostname: "cloudflare.local", Answer: "10.0.0.12", Source: sourceRef, Output: "cloudflare"},
+	}}}
+	app.outputs = []contracts.Output{adguardOutput, cloudflareOutput}
+
+	if err := app.reconcileOnce(context.Background()); err != nil {
+		t.Fatalf("reconcile once: %v", err)
+	}
+
+	if got := adguardOutput.createCount(); got != 2 {
+		t.Fatalf("expected 2 adguard create calls, got %d", got)
+	}
+	if got := cloudflareOutput.createCount(); got != 2 {
+		t.Fatalf("expected 2 cloudflare create calls, got %d", got)
+	}
+	for _, record := range adguardOutput.created {
+		if record.Output == "cloudflare" {
+			t.Fatalf("adguard output received cloudflare-only record: %+v", adguardOutput.created)
+		}
+	}
+	for _, record := range cloudflareOutput.created {
+		if record.Output == "adguard" {
+			t.Fatalf("cloudflare output received adguard-only record: %+v", cloudflareOutput.created)
+		}
+	}
+}
+
 func TestAppRunStartupUpdatesOwnedHostnameWhenVisibleRecordDrifted(t *testing.T) {
 	t.Parallel()
 

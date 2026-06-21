@@ -97,10 +97,13 @@ These values control bounded backoff during reconcile and watch-reconnect recove
 Docker sources interpret these labels:
 
 - `proxy.exclude=true` disables the container.
+- `proxy.dns` controls DNS participation: unset or `true` applies to every configured output, `false` opts the container out of DNS, and a value like `adguard` or `cloudflare` limits the record to that output type.
 - `proxy.aliases` is a comma-separated alias list.
 - `proxy.<alias>.port` defines a named alias.
 - `proxy.#<n>.port` and `proxy.*.port` provide indexed and wildcard ports.
 - `proxy.<alias>.host`, `proxy.#<n>.host`, and `proxy.*.host` override the answer target.
+
+When a container stops producing a desired record because labels changed, the daemon drops ownership from local state and leaves the remote DNS record in place. This avoids deleting a record that an operator may want to keep or manage manually later, but it also means label changes do not clean up remote DNS automatically.
 
 Lookup precedence for host overrides is:
 
