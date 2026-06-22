@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/aaronflorey/docker-dns-sync/compare/v0.2.0...v0.2.1) (2026-06-21)
+
+
+### Bug Fixes
+
+* **docker:** add proxy.dns output targeting ([1ac8811](https://github.com/aaronflorey/docker-dns-sync/commit/1ac88110ea063467bd7bde8ad5c1cb45faf194ba))
+
 ## [0.2.0](https://github.com/aaronflorey/docker-dns-sync/compare/v0.1.0...v0.2.0) (2026-05-28)
 
 
