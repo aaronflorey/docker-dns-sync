@@ -46,7 +46,12 @@ Use `password_ref = "ENV:ADGUARD_PASSWORD"` instead of embedding credentials in 
 
 - Install the pinned Go toolchain with `mise install`.
 - Run static checks with `mise exec -- go vet ./...`.
-- Run tests with `mise exec -- go test ./...`.
+- Run unit tests with `mise exec -- go test ./...`.
+- Run opt-in live Docker verification with `mise run live-test`.
+- Live verification requires `docker`, `docker compose`, and `curl`; `dig` is optional because the script falls back to containerized `nslookup`.
+- The live test is not part of the default Docker-free `go test` / `go vet` path and cleans up with `docker compose ... down -v` plus temporary runtime directory removal unless `--keep-running` or `KEEP_RUNNING=1` is used; keep-running mode prints the manual cleanup commands you must run after inspection.
+- Keep secrets out of logs and shell history: use env references, do not paste real credentials inline, and avoid dumping compose logs by default.
+- Stale-owned remote rewrite deletion coverage is intentionally deferred until `.weave/plans/stale-owned-remote-cleanup.md` lands.
 - Renovate is configured through `renovate.json` for Go modules, GitHub Actions, and container image references.
 
 ## Release Automation

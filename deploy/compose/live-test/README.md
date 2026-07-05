@@ -2,35 +2,59 @@
 
 This stack gives you a local AdGuard Home instance, the `docker-dns-sync` daemon under test, and one labeled sample workload.
 
+The default config is AdGuard-only so the smoke test can run without any external DNS provider credentials.
+
 ## Services
 
 - `adguardhome` exposes the admin/API UI on `http://127.0.0.1:13000`.
 - `docker-dns-sync` watches the host Docker socket and syncs daemon-owned rewrites into AdGuard.
-- `whoami` is a disposable labeled workload exposed on `http://127.0.0.1:8080`.
+- `whoami` is a disposable labeled workload used only to drive managed rewrite creation in AdGuard; it is not published on a host port.
 - `adguard-init` runs once to complete AdGuard's first-install flow automatically.
 
-## Credentials
+## Prerequisites
 
-- Username: `admin`
-- Password: `adguard-test-password`
+- `docker`
+- `docker compose`
+- `curl`
+- Optional: `dig` for host-side DNS checks. If `dig` is missing, `deploy/compose/live-test/verify.sh` falls back to a containerized `nslookup` check.
 
-## Run
+## Automated run
 
-```bash
-docker compose -f deploy/compose/live-test/compose.yaml up -d --build
-docker compose -f deploy/compose/live-test/compose.yaml logs -f docker-dns-sync
-```
-
-## Verify
-
-Check that the rewrite exists:
+Prefer the automated smoke test instead of manual `docker compose` steps:
 
 ```bash
-curl -u admin:adguard-test-password http://127.0.0.1:13000/control/rewrite/list
-dig @127.0.0.1 -p 5353 whoami.test
+mise run live-test
 ```
 
-Expected result: `whoami.test` should resolve to `127.0.0.1`.
+What it covers by default:
+
+- initial managed rewrite creation
+- managed rewrite update and restore
+- manual-record safety across daemon restart
+- restart recovery
+
+Cleanup defaults to `docker compose -f deploy/compose/live-test/compose.yaml down -v` on exit and removes the temporary runtime bind-mount directories. Keep the stack running only when you need to inspect it:
+
+```bash
+mise run live-test -- --keep-running
+# or
+KEEP_RUNNING=1 mise run live-test
+```
+
+In keep-running mode, the script preserves the temporary runtime directories that back the AdGuard and state bind mounts, then prints the exact `docker compose ... down -v` and `rm -rf ...` cleanup commands to run when you are done inspecting the stack.
+
+Optional external outputs should be added only when you want to exercise them explicitly, and any secret must stay as an environment reference such as `api_key_ref = "ENV:CLOUDFLARE_API_KEY"`.
+
+## Credentials and log hygiene
+
+- The test stack uses fixed local-only AdGuard credentials inside the compose fixture.
+- Do not paste real credentials inline when extending the stack or copying commands into docs.
+- Do not echo secret environment values, enable `set -x`, or dump compose logs by default.
+- If you need extra diagnostics, inspect only the specific service or API response relevant to the failure and avoid sharing secret-bearing config.
+
+## Scope note
+
+This smoke test does **not** yet assert stale-owned remote rewrite deletion. That coverage is intentionally deferred until `.weave/plans/stale-owned-remote-cleanup.md` lands.
 
 ## Why The Sample Labels Look Like This
 

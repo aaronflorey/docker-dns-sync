@@ -6,7 +6,7 @@
 mise exec -- go test ./...
 ```
 
-The CI workflow uses the same command.
+The default test path is Docker-free. The CI workflow uses the same unit-test command and does not require the live Docker stack.
 
 ## Static verification
 
@@ -14,18 +14,41 @@ The CI workflow uses the same command.
 mise exec -- go vet ./...
 ```
 
-## Integration-style local verification
+`go vet` is also part of the normal Docker-free verification path.
 
-Use the live test stack in `deploy/compose/live-test/`:
+## Opt-in live Docker verification
+
+Use the live test stack in `deploy/compose/live-test/` only when you want end-to-end coverage against Docker + AdGuard Home.
 
 ```bash
-docker compose -f deploy/compose/live-test/compose.yaml up -d --build
-docker compose -f deploy/compose/live-test/compose.yaml logs -f docker-dns-sync
-curl -u admin:adguard-test-password http://127.0.0.1:13000/control/rewrite/list
-dig @127.0.0.1 -p 5353 whoami.test
+mise run live-test
 ```
 
-The expected resolution for `whoami.test` is `127.0.0.1`.
+Prerequisites:
+
+- `docker`
+- `docker compose`
+- `curl`
+- Optional: `dig` if you want host-side DNS tooling. The script falls back to containerized `nslookup` when `dig` is unavailable.
+
+What `mise run live-test` covers:
+
+- managed rewrite create/update/restore
+- manual-record safety
+- restart recovery
+
+Cleanup behavior:
+
+- default: tears the stack down with `docker compose ... down -v`
+- opt-out: `mise run live-test -- --keep-running` or `KEEP_RUNNING=1 mise run live-test`
+- keep-running mode preserves the temporary runtime bind-mount directories and prints the exact compose-down plus `rm -rf ...` cleanup commands you must run after inspection
+
+Secret and log hygiene:
+
+- keep credentials in env references or fixture defaults; do not paste real credentials inline
+- do not echo secret env values, enable shell tracing, or dump compose logs by default
+
+Coverage note: stale-owned remote rewrite deletion is intentionally not asserted here until `.weave/plans/stale-owned-remote-cleanup.md` lands.
 
 ## Test fixtures
 

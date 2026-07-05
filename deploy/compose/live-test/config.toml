@@ -10,13 +10,6 @@ url = "http://adguardhome:3000"
 username = "admin"
 password_ref = "ENV:ADGUARD_PASSWORD"
 
-[[outputs]]
-type = "cloudflare"
-name = "cloudflare"
-enabled = true
-zone_id = "123456789"
-api_key_ref = "ENV:CLOUDFLARE_API_KEY"
-
 [state]
 path = "/var/lib/docker-dns-sync/state.json"
 

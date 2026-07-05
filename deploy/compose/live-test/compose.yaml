@@ -9,8 +9,8 @@ services:
       - "5353:53/tcp"
       - "5353:53/udp"
     volumes:
-      - ./adguard/conf:/opt/adguardhome/conf
-      - ./adguard/work:/opt/adguardhome/work
+      - ${LIVE_TEST_ADGUARD_CONF_DIR:-./adguard/conf}:/opt/adguardhome/conf
+      - ${LIVE_TEST_ADGUARD_WORK_DIR:-./adguard/work}:/opt/adguardhome/work
 
   adguard-init:
     image: curlimages/curl:8.16.0
@@ -56,20 +56,17 @@ services:
         condition: service_completed_successfully
     environment:
       ADGUARD_PASSWORD: adguard-test-password
-      CLOUDFLARE_API_KEY: ${CLOUDFLARE_API_KEY}
     command:
       - -config
       - /etc/docker-dns-sync/config.toml
     volumes:
       - ./config.toml:/etc/docker-dns-sync/config.toml:ro
-      - ./state:/var/lib/docker-dns-sync
+      - ${LIVE_TEST_STATE_DIR:-./state}:/var/lib/docker-dns-sync
       - /var/run/docker.sock:/var/run/docker.sock
 
   whoami:
     image: traefik/whoami:v1.11.0
     restart: unless-stopped
-    ports:
-      - "8080:80"
     labels:
       - proxy.aliases=whoami.test
       - proxy.whoami.test.port=80
