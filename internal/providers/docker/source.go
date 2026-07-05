@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"sort"
 	"strings"
 
@@ -28,9 +29,10 @@ type Provider struct {
 	defaultHost string
 	baseDomain  string
 	client      apiClient
+	logger      *slog.Logger
 }
 
-func New(cfg config.SourceConfig) (*Provider, error) {
+func New(cfg config.SourceConfig, logger *slog.Logger) (*Provider, error) {
 	cli, err := mobyclient.NewClientWithOpts(
 		mobyclient.WithHost(cfg.Endpoint),
 		mobyclient.WithAPIVersionNegotiation(),
@@ -48,6 +50,7 @@ func New(cfg config.SourceConfig) (*Provider, error) {
 		defaultHost: defaultAnswerTarget(cfg),
 		baseDomain:  normalizeName(cfg.BaseDomain),
 		client:      cli,
+		logger:      logger,
 	}, nil
 }
 
@@ -77,13 +80,48 @@ func (p *Provider) ListDesired(ctx context.Context) ([]contracts.DesiredRecord, 
 		return nil, temporaryError{err: requestErr}
 	}
 
+	logDockerTrace(ctx, p.logger, "listed docker containers for desired record derivation",
+		"provider", providerKey(p.ref),
+	)
+
 	desired := make([]contracts.DesiredRecord, 0)
 	for _, container := range result.Items {
 		if container.State != containertypes.StateRunning {
+			logDockerTrace(ctx, p.logger, "skipped non-running docker container during desired record derivation",
+				"provider", providerKey(p.ref),
+				"container_id", strings.TrimSpace(container.ID),
+				"display_name", containerDisplayName(container),
+			)
 			continue
 		}
 
-		desired = append(desired, deriveDesiredRecords(p.ref, p.defaultHost, p.baseDomain, container)...)
+		records, diagnostics := deriveDesiredRecordsDetailed(p.ref, p.defaultHost, p.baseDomain, container)
+		for _, diagnostic := range diagnostics {
+			args := []any{
+				"provider", providerKey(p.ref),
+				"container_id", strings.TrimSpace(container.ID),
+				"display_name", containerDisplayName(container),
+				"reason", diagnostic.reason,
+			}
+			if diagnostic.alias != "" {
+				args = append(args, "alias", diagnostic.alias)
+			}
+			if diagnostic.hostname != "" {
+				args = append(args, "hostname", diagnostic.hostname)
+			}
+			if diagnostic.hint != "" {
+				args = append(args, "hint", diagnostic.hint)
+			}
+			logDockerDebug(ctx, p.logger, "skipped docker DNS record derivation", args...)
+		}
+
+		logDockerTrace(ctx, p.logger, "derived desired records from docker container",
+			"provider", providerKey(p.ref),
+			"container_id", strings.TrimSpace(container.ID),
+			"display_name", containerDisplayName(container),
+		)
+
+		desired = append(desired, records...)
 	}
 
 	sort.Slice(desired, func(i, j int) bool {
@@ -91,6 +129,26 @@ func (p *Provider) ListDesired(ctx context.Context) ([]contracts.DesiredRecord, 
 	})
 
 	return desired, nil
+}
+
+const dockerTraceLevel slog.Level = slog.LevelDebug - 4
+
+func providerKey(provider contracts.ProviderRef) string {
+	return provider.Type + "/" + provider.Name
+}
+
+func logDockerDebug(ctx context.Context, logger *slog.Logger, msg string, args ...any) {
+	if logger == nil || !logger.Enabled(ctx, slog.LevelDebug) {
+		return
+	}
+	logger.DebugContext(ctx, msg, args...)
+}
+
+func logDockerTrace(ctx context.Context, logger *slog.Logger, msg string, args ...any) {
+	if logger == nil || !logger.Enabled(ctx, dockerTraceLevel) {
+		return
+	}
+	logger.Log(ctx, dockerTraceLevel, msg, args...)
 }
 
 func defaultAnswerTarget(cfg config.SourceConfig) string {
@@ -188,6 +246,9 @@ func shouldTriggerWatchHint(event events.Message) bool {
 func shouldTriggerNetworkWatchHint(action events.Action, attributes map[string]string) bool {
 	switch action {
 	case "connect", "disconnect":
+		// Docker network events do not include the container labels we need for a
+		// label-aware filter. We intentionally treat any container attach/detach as
+		// a broad reconcile hint and rely on runtime debounce to coalesce bursts.
 		return attributes["type"] == "container" && attributes["container"] != ""
 	default:
 		return false

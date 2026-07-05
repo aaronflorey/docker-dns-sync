@@ -30,8 +30,8 @@ func NewFactoryRegistry() *FactoryRegistry {
 
 func NewDefaultFactoryRegistry() *FactoryRegistry {
 	registry := NewFactoryRegistry()
-	mustRegister(registry.RegisterSource("docker", func(cfg config.SourceConfig, _ RuntimeDeps) (contracts.Source, error) {
-		return dockerprovider.New(cfg)
+	mustRegister(registry.RegisterSource("docker", func(cfg config.SourceConfig, deps RuntimeDeps) (contracts.Source, error) {
+		return dockerprovider.New(cfg, deps.Logger)
 	}))
 	mustRegister(registry.RegisterOutput("adguard", func(cfg config.OutputConfig, _ RuntimeDeps) (contracts.Output, error) {
 		return adguardprovider.New(cfg), nil

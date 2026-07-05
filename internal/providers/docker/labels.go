@@ -11,18 +11,39 @@ import (
 )
 
 func deriveDesiredRecords(provider contracts.ProviderRef, defaultTarget, baseDomain string, container containertypes.Summary) []contracts.DesiredRecord {
+	records, _ := deriveDesiredRecordsDetailed(provider, defaultTarget, baseDomain, container)
+	return records
+}
+
+type derivationDiagnostic struct {
+	alias    string
+	hostname string
+	reason   string
+	hint     string
+}
+
+func deriveDesiredRecordsDetailed(provider contracts.ProviderRef, defaultTarget, baseDomain string, container containertypes.Summary) ([]contracts.DesiredRecord, []derivationDiagnostic) {
 	if isExcluded(container.Labels) {
-		return nil
+		return nil, []derivationDiagnostic{{
+			reason: "proxy.exclude",
+			hint:   "remove proxy.exclude=true to let this container publish DNS records",
+		}}
 	}
 
 	outputType, include := dnsOutputType(container.Labels)
 	if !include {
-		return nil
+		return nil, []derivationDiagnostic{{
+			reason: "proxy.dns=false",
+			hint:   "set proxy.dns=true or remove proxy.dns to enable DNS derivation",
+		}}
 	}
 
 	aliases := collectAliases(container)
 	if len(aliases) == 0 {
-		return nil
+		return nil, []derivationDiagnostic{{
+			reason: "no supported alias/port",
+			hint:   "set proxy.aliases with matching proxy.<alias>.port labels, or define proxy.*.port / proxy.#.port",
+		}}
 	}
 
 	answer := normalizeAnswerTarget(defaultTarget)
@@ -34,10 +55,16 @@ func deriveDesiredRecords(provider contracts.ProviderRef, defaultTarget, baseDom
 	}
 
 	records := make([]contracts.DesiredRecord, 0, len(aliases))
+	diagnostics := make([]derivationDiagnostic, 0)
 	for _, alias := range aliases {
 		aliasName := alias.name
 		hostname := qualifyHostname(aliasName, baseDomain)
 		if hostname == "" {
+			diagnostics = append(diagnostics, derivationDiagnostic{
+				alias:  aliasName,
+				reason: "invalid/empty hostname",
+				hint:   "set proxy.aliases to a valid hostname value",
+			})
 			continue
 		}
 
@@ -46,6 +73,12 @@ func deriveDesiredRecords(provider contracts.ProviderRef, defaultTarget, baseDom
 			target = answer
 		}
 		if target == "" {
+			diagnostics = append(diagnostics, derivationDiagnostic{
+				alias:    aliasName,
+				hostname: hostname,
+				reason:   "empty_answer_target",
+				hint:     "set sources[].host_ip or proxy.*.host / proxy.<alias>.host",
+			})
 			continue
 		}
 
@@ -61,7 +94,7 @@ func deriveDesiredRecords(provider contracts.ProviderRef, defaultTarget, baseDom
 		return desiredRecordLess(records[i], records[j])
 	})
 
-	return records
+	return records, diagnostics
 }
 
 func qualifyHostname(hostname, baseDomain string) string {

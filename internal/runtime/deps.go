@@ -12,7 +12,10 @@ import (
 	"github.com/aaronflorey/docker-dns-sync/internal/config"
 )
 
-const LevelTrace slog.Level = slog.LevelDebug - 4
+const (
+	LevelTrace               slog.Level = slog.LevelDebug - 4
+	defaultWatchHintDebounce            = 500 * time.Millisecond
+)
 
 type RetryPolicy struct {
 	InitialInterval time.Duration
@@ -21,9 +24,10 @@ type RetryPolicy struct {
 }
 
 type RuntimeDeps struct {
-	Logger   *slog.Logger
-	LogLevel slog.Level
-	Retry    RetryPolicy
+	Logger             *slog.Logger
+	LogLevel           slog.Level
+	Retry              RetryPolicy
+	WatchHintDebounce  time.Duration
 }
 
 func NewRuntimeDeps(cfg config.Config) (RuntimeDeps, error) {
@@ -49,9 +53,10 @@ func NewRuntimeDeps(cfg config.Config) (RuntimeDeps, error) {
 	}
 
 	return RuntimeDeps{
-		Logger:   slog.New(handler),
-		LogLevel: level,
-		Retry:    retry,
+		Logger:            slog.New(handler),
+		LogLevel:          level,
+		Retry:             retry,
+		WatchHintDebounce: defaultWatchHintDebounce,
 	}, nil
 }
 

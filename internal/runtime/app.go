@@ -271,6 +271,10 @@ func (a *App) runSteadyState(ctx context.Context) error {
 	events := make(chan sourceWatchEvent, len(watchers))
 	reconnectDelays := make(map[int]time.Duration, len(watchers))
 	reconnectPending := make(map[int]bool, len(watchers))
+	watchHintDebounce := a.deps.WatchHintDebounce
+	var watchHintTimer *time.Timer
+	var watchHintTimerC <-chan time.Time
+	pendingWatchHintCount := 0
 	for i, watchable := range watchers {
 		reconnectDelays[i] = a.deps.Retry.InitialInterval
 		a.startSourceWatch(ctx, i, watchable, events)
@@ -285,14 +289,39 @@ func (a *App) runSteadyState(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
+			stopTimer(watchHintTimer)
 			return ctx.Err()
+		case <-watchHintTimerC:
+			watchHintTimer = nil
+			watchHintTimerC = nil
+			coalescedHintCount := pendingWatchHintCount
+			pendingWatchHintCount = 0
+			logDebug(ctx, a.deps.Logger, "running coalesced watch hint reconcile", "debounce", watchHintDebounce, "coalesced_hint_count", coalescedHintCount)
+			if err := a.reconcile(ctx, "watch_hint"); err != nil {
+				return err
+			}
 		case event := <-events:
 			if event.hint {
-				logDebug(ctx, a.deps.Logger, "source watch emitted reconcile hint", "source", providerKey(a.sources[event.sourceIndex].Provider()))
+				provider := a.sources[event.sourceIndex].Provider()
 				reconnectDelays[event.sourceIndex] = a.deps.Retry.InitialInterval
-				if err := a.reconcile(ctx, "watch_hint"); err != nil {
-					return err
+				if watchHintDebounce <= 0 {
+					logDebug(ctx, a.deps.Logger, "source watch emitted reconcile hint", "source", providerKey(provider), "debounce", watchHintDebounce, "coalesced_hint_count", 1)
+					if err := a.reconcile(ctx, "watch_hint"); err != nil {
+						return err
+					}
+					continue
 				}
+
+				if watchHintTimer == nil {
+					pendingWatchHintCount = 1
+					watchHintTimer = time.NewTimer(watchHintDebounce)
+					watchHintTimerC = watchHintTimer.C
+					logDebug(ctx, a.deps.Logger, "started watch hint debounce", "source", providerKey(provider), "debounce", watchHintDebounce, "coalesced_hint_count", pendingWatchHintCount)
+					continue
+				}
+
+				pendingWatchHintCount++
+				logDebug(ctx, a.deps.Logger, "coalesced watch hint while debounce pending", "source", providerKey(provider), "debounce", watchHintDebounce, "coalesced_hint_count", pendingWatchHintCount)
 				continue
 			}
 
@@ -300,6 +329,13 @@ func (a *App) runSteadyState(ctx context.Context) error {
 				reconnectPending[event.sourceIndex] = false
 				logDebug(ctx, a.deps.Logger, "restarting source watch after backoff", "source", providerKey(a.sources[event.sourceIndex].Provider()))
 				a.startSourceWatch(ctx, event.sourceIndex, watchers[event.sourceIndex], events)
+				if watchHintTimer != nil {
+					logDebug(ctx, a.deps.Logger, "clearing pending watch hint debounce after reconnect repair", "source", providerKey(a.sources[event.sourceIndex].Provider()), "debounce", watchHintDebounce, "coalesced_hint_count", pendingWatchHintCount)
+					stopTimer(watchHintTimer)
+					watchHintTimer = nil
+					watchHintTimerC = nil
+					pendingWatchHintCount = 0
+				}
 				if err := a.reconcile(ctx, "watch_reconnect_repair"); err != nil {
 					return err
 				}
@@ -316,6 +352,18 @@ func (a *App) runSteadyState(ctx context.Context) error {
 			reconnectPending[event.sourceIndex] = true
 			reconnectDelays[event.sourceIndex] = nextBackoffDelay(delay, a.deps.Retry.MaxInterval)
 			a.scheduleSourceReconnect(ctx, event.sourceIndex, delay, events)
+		}
+	}
+}
+
+func stopTimer(timer *time.Timer) {
+	if timer == nil {
+		return
+	}
+	if !timer.Stop() {
+		select {
+		case <-timer.C:
+		default:
 		}
 	}
 }

@@ -1,9 +1,12 @@
 package docker
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
+	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -158,6 +161,64 @@ func TestListDesiredReturnsClientErrors(t *testing.T) {
 	}
 }
 
+func TestListDesiredLogsSafeDiagnosticsForMissingAnswerTargets(t *testing.T) {
+	t.Parallel()
+
+	providerRef := contracts.ProviderRef{Type: "docker", Name: "local"}
+	container := containerSummary("ctr-safe-log", "/svc", map[string]string{
+		"proxy.aliases":   "app, admin",
+		"proxy.#1.port":   "8080",
+		"proxy.#2.port":   "9090",
+		"proxy.#2.host":   "admin.internal",
+		"proxy.api_token": "secret-token",
+	}, "running", "172.18.0.40")
+
+	var buf bytes.Buffer
+	provider := &Provider{
+		ref:         providerRef,
+		endpoint:    "unix:///var/run/docker.sock",
+		defaultHost: "",
+		client: &fakeDockerClient{
+			host:       "unix:///var/run/docker.sock",
+			containers: []containertypes.Summary{container},
+		},
+		logger: slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})),
+	}
+
+	got, err := provider.ListDesired(context.Background())
+	if err != nil {
+		t.Fatalf("ListDesired returned error: %v", err)
+	}
+
+	want := []contracts.DesiredRecord{{
+		Hostname: "admin",
+		Answer:   "admin.internal",
+		Source:   contracts.SourceObjectRef{Provider: providerRef, ID: "ctr-safe-log", DisplayName: "svc"},
+	}}
+	assertDesiredRecordsEqual(t, got, want)
+
+	logs := buf.String()
+	for _, want := range []string{
+		"msg=\"skipped docker DNS record derivation\"",
+		"reason=empty_answer_target",
+		"alias=app",
+		"hostname=app",
+		"provider=docker/local",
+		"container_id=ctr-safe-log",
+		"display_name=svc",
+	} {
+		if !strings.Contains(logs, want) {
+			t.Fatalf("expected log output to contain %q, got %s", want, logs)
+		}
+	}
+
+	for _, unwanted := range []string{"proxy.aliases", "proxy.#2.host", "map[", "secret-token"} {
+		if strings.Contains(logs, unwanted) {
+			t.Fatalf("expected log output to omit %q, got %s", unwanted, logs)
+		}
+	}
+}
+
 func TestWatchEmitsHintsForRelevantContainerEvents(t *testing.T) {
 	t.Parallel()
 
@@ -298,13 +359,13 @@ func TestShouldTriggerNetworkWatchHint(t *testing.T) {
 			want:       false,
 		},
 		{
-			name:       "keeps container attach recovery",
+			name:       "keeps broad container attach recovery because network events do not carry labels",
 			action:     "connect",
 			attributes: map[string]string{"type": "container", "container": "ctr-1"},
 			want:       true,
 		},
 		{
-			name:       "keeps container detach recovery",
+			name:       "keeps broad container detach recovery because network events do not carry labels",
 			action:     "disconnect",
 			attributes: map[string]string{"type": "container", "container": "ctr-1"},
 			want:       true,

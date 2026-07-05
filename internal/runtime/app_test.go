@@ -17,6 +17,8 @@ import (
 	"github.com/aaronflorey/docker-dns-sync/internal/state"
 )
 
+const shortWatchHintDebounce = 20 * time.Millisecond
+
 func TestAppRunStartupReconcilesAndPersistsState(t *testing.T) {
 	t.Parallel()
 
@@ -275,6 +277,51 @@ func TestAppRunRuntimeReconcilesAfterWatchHint(t *testing.T) {
 	t.Parallel()
 
 	provider := contracts.ProviderRef{Type: "docker", Name: "local"}
+	session := &watchSession{hints: make(chan struct{}, 3), errs: make(chan error, 1)}
+	source := &watchSourceStub{
+		startupSourceStub: startupSourceStub{
+			provider: provider,
+			desired: []contracts.DesiredRecord{{
+				Hostname: "app.local",
+				Answer:   "10.0.0.10",
+				Source:   contracts.SourceObjectRef{Provider: provider, ID: "ctr-1", DisplayName: "svc"},
+			}},
+		},
+		sessions: []*watchSession{session},
+	}
+	output := &startupOutputStub{provider: contracts.ProviderRef{Type: "adguard", Name: "primary"}}
+
+	app := New(testRuntimeConfig(filepath.Join(t.TempDir(), "state.json")))
+	app.registry = testRegistry(stubSourceFactory{source: source}, stubOutputFactory{output: output})
+	app.newDeps = func(config.Config) (RuntimeDeps, error) {
+		return testRuntimeDeps(RetryPolicy{
+			InitialInterval: 10 * time.Millisecond,
+			MaxInterval:     20 * time.Millisecond,
+			MaxElapsedTime:  200 * time.Millisecond,
+		}, shortWatchHintDebounce), nil
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- app.Run(ctx) }()
+
+	waitForCondition(t, func() bool {
+		return source.listDesiredCallCount() == 2 && output.createCount() == 1 && output.listVisibleCount() == 2
+	})
+
+	session.hints <- struct{}{}
+	waitForConditionWithin(t, 250*time.Millisecond, func() bool {
+		return source.listDesiredCallCount() >= 3 && output.listVisibleCount() >= 3
+	})
+
+	cancel()
+	assertRunStops(t, done)
+}
+
+func TestAppRunCoalescesWatchHintsWithinDebounceWindow(t *testing.T) {
+	t.Parallel()
+
+	provider := contracts.ProviderRef{Type: "docker", Name: "local"}
 	session := newWatchSession()
 	source := &watchSourceStub{
 		startupSourceStub: startupSourceStub{
@@ -292,14 +339,11 @@ func TestAppRunRuntimeReconcilesAfterWatchHint(t *testing.T) {
 	app := New(testRuntimeConfig(filepath.Join(t.TempDir(), "state.json")))
 	app.registry = testRegistry(stubSourceFactory{source: source}, stubOutputFactory{output: output})
 	app.newDeps = func(config.Config) (RuntimeDeps, error) {
-		return RuntimeDeps{
-			Logger: slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelInfo})),
-			Retry: RetryPolicy{
-				InitialInterval: 10 * time.Millisecond,
-				MaxInterval:     20 * time.Millisecond,
-				MaxElapsedTime:  200 * time.Millisecond,
-			},
-		}, nil
+		return testRuntimeDeps(RetryPolicy{
+			InitialInterval: 10 * time.Millisecond,
+			MaxInterval:     20 * time.Millisecond,
+			MaxElapsedTime:  200 * time.Millisecond,
+		}, shortWatchHintDebounce), nil
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -307,12 +351,18 @@ func TestAppRunRuntimeReconcilesAfterWatchHint(t *testing.T) {
 	go func() { done <- app.Run(ctx) }()
 
 	waitForCondition(t, func() bool {
-		return source.listDesiredCallCount() == 2 && output.createCount() == 1 && output.listVisibleCount() == 2
+		return source.listDesiredCallCount() == 2 && output.listVisibleCount() == 2 && source.watchCallCount() == 1
 	})
 
 	session.hints <- struct{}{}
-	waitForCondition(t, func() bool {
-		return source.listDesiredCallCount() >= 3 && output.listVisibleCount() >= 3
+	session.hints <- struct{}{}
+	session.hints <- struct{}{}
+
+	waitForConditionWithin(t, 250*time.Millisecond, func() bool {
+		return source.listDesiredCallCount() == 3 && output.listVisibleCount() == 3
+	})
+	assertConditionHolds(t, 50*time.Millisecond, func() bool {
+		return source.listDesiredCallCount() == 3 && output.listVisibleCount() == 3
 	})
 
 	cancel()
@@ -341,14 +391,11 @@ func TestAppRunReconnectsAfterWatchDisconnect(t *testing.T) {
 	app := New(testRuntimeConfig(filepath.Join(t.TempDir(), "state.json")))
 	app.registry = testRegistry(stubSourceFactory{source: source}, stubOutputFactory{output: output})
 	app.newDeps = func(config.Config) (RuntimeDeps, error) {
-		return RuntimeDeps{
-			Logger: slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelInfo})),
-			Retry: RetryPolicy{
-				InitialInterval: 10 * time.Millisecond,
-				MaxInterval:     20 * time.Millisecond,
-				MaxElapsedTime:  200 * time.Millisecond,
-			},
-		}, nil
+		return testRuntimeDeps(RetryPolicy{
+			InitialInterval: 10 * time.Millisecond,
+			MaxInterval:     20 * time.Millisecond,
+			MaxElapsedTime:  200 * time.Millisecond,
+		}, shortWatchHintDebounce), nil
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -365,7 +412,7 @@ func TestAppRunReconnectsAfterWatchDisconnect(t *testing.T) {
 	})
 
 	second.hints <- struct{}{}
-	waitForCondition(t, func() bool {
+	waitForConditionWithin(t, 250*time.Millisecond, func() bool {
 		return source.listDesiredCallCount() >= 4
 	})
 
@@ -397,14 +444,11 @@ func TestAppRunRetriesReconnectRepairAfterTransientSourceFailure(t *testing.T) {
 	app := New(testRuntimeConfig(filepath.Join(t.TempDir(), "state.json")))
 	app.registry = testRegistry(stubSourceFactory{source: source}, stubOutputFactory{output: output})
 	app.newDeps = func(config.Config) (RuntimeDeps, error) {
-		return RuntimeDeps{
-			Logger: slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelInfo})),
-			Retry: RetryPolicy{
-				InitialInterval: time.Millisecond,
-				MaxInterval:     2 * time.Millisecond,
-				MaxElapsedTime:  50 * time.Millisecond,
-			},
-		}, nil
+		return testRuntimeDeps(RetryPolicy{
+			InitialInterval: time.Millisecond,
+			MaxInterval:     2 * time.Millisecond,
+			MaxElapsedTime:  50 * time.Millisecond,
+		}, shortWatchHintDebounce), nil
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -422,7 +466,7 @@ func TestAppRunRetriesReconnectRepairAfterTransientSourceFailure(t *testing.T) {
 	assertRunStillRunning(t, done)
 
 	second.hints <- struct{}{}
-	waitForCondition(t, func() bool {
+	waitForConditionWithin(t, 250*time.Millisecond, func() bool {
 		return source.listDesiredCallCount() >= 6
 	})
 
@@ -453,14 +497,11 @@ func TestAppRunRetriesWatchHintReconcileAfterTransientSourceFailure(t *testing.T
 	app := New(testRuntimeConfig(filepath.Join(t.TempDir(), "state.json")))
 	app.registry = testRegistry(stubSourceFactory{source: source}, stubOutputFactory{output: output})
 	app.newDeps = func(config.Config) (RuntimeDeps, error) {
-		return RuntimeDeps{
-			Logger: slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelInfo})),
-			Retry: RetryPolicy{
-				InitialInterval: time.Millisecond,
-				MaxInterval:     2 * time.Millisecond,
-				MaxElapsedTime:  50 * time.Millisecond,
-			},
-		}, nil
+		return testRuntimeDeps(RetryPolicy{
+			InitialInterval: time.Millisecond,
+			MaxInterval:     2 * time.Millisecond,
+			MaxElapsedTime:  50 * time.Millisecond,
+		}, shortWatchHintDebounce), nil
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -472,7 +513,7 @@ func TestAppRunRetriesWatchHintReconcileAfterTransientSourceFailure(t *testing.T
 	})
 
 	session.hints <- struct{}{}
-	waitForCondition(t, func() bool {
+	waitForConditionWithin(t, 250*time.Millisecond, func() bool {
 		return source.listDesiredCallCount() >= 5 && output.listVisibleCount() >= 3
 	})
 	assertRunStillRunning(t, done)
@@ -568,6 +609,7 @@ func TestAppRunRetriesWatchTriggeredReconcileAfterOtherSourceFailure(t *testing.
 			MaxInterval:     2 * time.Millisecond,
 			MaxElapsedTime:  50 * time.Millisecond,
 		},
+		WatchHintDebounce: shortWatchHintDebounce,
 	}
 
 	app := New(testRuntimeConfig(statePath))
@@ -589,7 +631,7 @@ func TestAppRunRetriesWatchTriggeredReconcileAfterOtherSourceFailure(t *testing.
 	})
 
 	session.hints <- struct{}{}
-	waitForCondition(t, func() bool {
+	waitForConditionWithin(t, 250*time.Millisecond, func() bool {
 		return watchSource.listDesiredCallCount() >= 4 && otherSource.listDesiredCallCount() >= 4 && output.listVisibleCount() >= 3
 	})
 	assertRunStillRunning(t, done)
@@ -623,14 +665,11 @@ func TestAppRunDoesNotRetryWatchHintReconcileAfterMutationFailure(t *testing.T) 
 	app := New(testRuntimeConfig(filepath.Join(t.TempDir(), "state.json")))
 	app.registry = testRegistry(stubSourceFactory{source: source}, stubOutputFactory{output: output})
 	app.newDeps = func(config.Config) (RuntimeDeps, error) {
-		return RuntimeDeps{
-			Logger: slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelInfo})),
-			Retry: RetryPolicy{
-				InitialInterval: time.Millisecond,
-				MaxInterval:     2 * time.Millisecond,
-				MaxElapsedTime:  50 * time.Millisecond,
-			},
-		}, nil
+		return testRuntimeDeps(RetryPolicy{
+			InitialInterval: time.Millisecond,
+			MaxInterval:     2 * time.Millisecond,
+			MaxElapsedTime:  50 * time.Millisecond,
+		}, shortWatchHintDebounce), nil
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -902,6 +941,7 @@ func TestAppRunReconnectBackoffDoesNotBlockOtherWatchHints(t *testing.T) {
 			MaxInterval:     50 * time.Millisecond,
 			MaxElapsedTime:  200 * time.Millisecond,
 		},
+		WatchHintDebounce: shortWatchHintDebounce,
 	}
 
 	app := New(testRuntimeConfig(filepath.Join(t.TempDir(), "state.json")))
@@ -1432,7 +1472,6 @@ func (o *startupOutputStub) Create(_ context.Context, desired contracts.DesiredR
 	return nil
 }
 
-
 func (o *startupOutputStub) Update(_ context.Context, visible contracts.VisibleRecord, desired contracts.DesiredRecord) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -1644,6 +1683,14 @@ func testRuntimeConfig(statePath string) config.Config {
 		State:   config.StateConfig{Path: statePath},
 		Logging: config.LoggingConfig{Level: "info", Format: "text"},
 		Retry:   config.RetryConfig{InitialInterval: "1s", MaxInterval: "30s", MaxElapsedTime: "5m"},
+	}
+}
+
+func testRuntimeDeps(retry RetryPolicy, watchHintDebounce time.Duration) RuntimeDeps {
+	return RuntimeDeps{
+		Logger:            slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelInfo})),
+		Retry:             retry,
+		WatchHintDebounce: watchHintDebounce,
 	}
 }
 

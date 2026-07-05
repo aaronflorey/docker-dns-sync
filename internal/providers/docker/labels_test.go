@@ -2,6 +2,7 @@ package docker
 
 import (
 	"net/netip"
+	"strings"
 	"testing"
 
 	"github.com/aaronflorey/docker-dns-sync/internal/contracts"
@@ -176,6 +177,47 @@ func TestDesiredRecordDerivation(t *testing.T) {
 	}
 
 	assertDesiredRecordsEqual(t, got, want)
+}
+
+func TestDesiredRecordDerivationDetailedReportsSafeEmptyAnswerTargetDiagnostics(t *testing.T) {
+	t.Parallel()
+
+	provider := contracts.ProviderRef{Type: "docker", Name: "local"}
+	container := containerSummary("ctr-diag", "/svc", map[string]string{
+		"proxy.aliases":    "app, admin",
+		"proxy.#1.port":    "8080",
+		"proxy.#2.port":    "9090",
+		"proxy.#2.host":    "admin.internal",
+		"proxy.password":   "secret-password",
+		"com.example.note": "map[should:not leak]",
+	}, "running", "172.18.0.40")
+
+	got, diagnostics := deriveDesiredRecordsDetailed(provider, "", "", container)
+	want := []contracts.DesiredRecord{{
+		Hostname: "admin",
+		Answer:   "admin.internal",
+		Source:   contracts.SourceObjectRef{Provider: provider, ID: "ctr-diag", DisplayName: "svc"},
+	}}
+	assertDesiredRecordsEqual(t, got, want)
+
+	if len(diagnostics) != 1 {
+		t.Fatalf("expected 1 diagnostic, got %d (%+v)", len(diagnostics), diagnostics)
+	}
+	if diagnostics[0] != (derivationDiagnostic{
+		alias:    "app",
+		hostname: "app",
+		reason:   "empty_answer_target",
+		hint:     "set sources[].host_ip or proxy.*.host / proxy.<alias>.host",
+	}) {
+		t.Fatalf("unexpected diagnostic: %+v", diagnostics[0])
+	}
+
+	joined := diagnostics[0].alias + diagnostics[0].hostname + diagnostics[0].reason + diagnostics[0].hint
+	for _, unwanted := range []string{"secret-password", "map[should:not leak]", "proxy.aliases"} {
+		if strings.Contains(joined, unwanted) {
+			t.Fatalf("expected diagnostic to omit %q, got %+v", unwanted, diagnostics[0])
+		}
+	}
 }
 
 func TestExcludedContainersProduceNoDesiredRecords(t *testing.T) {
