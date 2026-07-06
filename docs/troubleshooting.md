@@ -33,6 +33,24 @@ The path does not exist, cannot be read, or the TOML is invalid. The repository 
 - Start from `testdata/config/example.toml`, `config.example.toml`, or another known-good sample.
 - Validate the TOML syntax before restart.
 
+## Unknown config key fails startup
+
+**Symptom**
+
+- `decode config file: ...`
+- `unknown field ...`
+- `undecoded keys: ...`
+
+**Cause**
+
+Config loading is strict. The daemon rejects misspelled keys, unexpected sections, and stale options instead of silently ignoring them.
+
+**Fix**
+
+- Remove the typo or unexpected key from the TOML file.
+- Rename the field to the documented key in [Configuration](configuration.md).
+- Restart only after the config contains documented keys only.
+
 ## Invalid Docker endpoint scheme
 
 **Symptom**

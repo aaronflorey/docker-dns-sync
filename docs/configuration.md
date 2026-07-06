@@ -23,6 +23,8 @@ The TOML file must define these top-level sections:
 
 The config is parsed first, then validated, then secret references are resolved from the process environment.
 
+Startup is strict about unknown TOML keys. Misspelled fields, extra sections, and stale options are rejected during load instead of being ignored, so remove the unexpected key and use a documented field name before restarting.
+
 ## Sources
 
 | Key | Required | Notes |
