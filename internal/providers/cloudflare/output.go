@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -35,6 +36,11 @@ type temporaryError struct {
 	err error
 }
 
+type sanitizedError struct {
+	err     error
+	message string
+}
+
 func (e temporaryError) Error() string {
 	return e.err.Error()
 }
@@ -45,6 +51,14 @@ func (e temporaryError) Unwrap() error {
 
 func (e temporaryError) Temporary() bool {
 	return true
+}
+
+func (e sanitizedError) Error() string {
+	return e.message
+}
+
+func (e sanitizedError) Unwrap() error {
+	return e.err
 }
 
 func New(cfg config.OutputConfig) *Provider {
@@ -158,9 +172,9 @@ func (p *Provider) Create(ctx context.Context, desired contracts.DesiredRecord) 
 }
 
 func (p *Provider) Update(ctx context.Context, visible contracts.VisibleRecord, desired contracts.DesiredRecord) (*contracts.RecordProvenance, error) {
-	meta, ok := p.lookupVisibleRecord(visible.Hostname, visible.Answer)
-	if !ok {
-		return nil, fmt.Errorf("cloudflare visible record %s is missing cached metadata", visibleRecordKey(visible.Hostname, visible.Answer))
+	recordID, err := p.visibleRemoteID(visible)
+	if err != nil {
+		return nil, err
 	}
 
 	body, err := buildRecordUpdateBody(desired.Hostname, desired.Answer)
@@ -168,7 +182,7 @@ func (p *Provider) Update(ctx context.Context, visible contracts.VisibleRecord, 
 		return nil, err
 	}
 
-	updated, err := p.client.DNS.Records.Update(ctx, meta.id, dns.RecordUpdateParams{
+	updated, err := p.client.DNS.Records.Update(ctx, recordID, dns.RecordUpdateParams{
 		ZoneID: cloudflare.F(p.zoneID),
 		Body:   body,
 	})
@@ -180,17 +194,30 @@ func (p *Provider) Update(ctx context.Context, visible contracts.VisibleRecord, 
 }
 
 func (p *Provider) Delete(ctx context.Context, visible contracts.VisibleRecord) error {
-	meta, ok := p.lookupVisibleRecord(visible.Hostname, visible.Answer)
-	if !ok {
-		return fmt.Errorf("cloudflare visible record %s is missing cached metadata", visibleRecordKey(visible.Hostname, visible.Answer))
+	recordID, err := p.visibleRemoteID(visible)
+	if err != nil {
+		return err
 	}
 
-	_, err := p.client.DNS.Records.Delete(ctx, meta.id, dns.RecordDeleteParams{ZoneID: cloudflare.F(p.zoneID)})
+	_, err = p.client.DNS.Records.Delete(ctx, recordID, dns.RecordDeleteParams{ZoneID: cloudflare.F(p.zoneID)})
 	if err != nil {
 		return wrapCloudflareTemporary(fmt.Errorf("delete cloudflare dns record: %w", err))
 	}
 
 	return nil
+}
+
+func (p *Provider) visibleRemoteID(visible contracts.VisibleRecord) (string, error) {
+	if visible.Provenance == nil || strings.TrimSpace(visible.Provenance.RemoteID) == "" {
+		return "", fmt.Errorf("cloudflare visible record %s is missing remote provenance", visibleRecordKey(visible.Hostname, visible.Answer))
+	}
+
+	remoteID := strings.TrimSpace(visible.Provenance.RemoteID)
+	if meta, ok := p.lookupVisibleRecord(visible.Hostname, visible.Answer); ok && meta.id != remoteID {
+		return "", fmt.Errorf("cloudflare visible record %s remote provenance does not match cached metadata", visibleRecordKey(visible.Hostname, visible.Answer))
+	}
+
+	return remoteID, nil
 }
 
 func (p *Provider) lookupVisibleRecord(hostname, answer string) (visibleRecordMeta, bool) {
@@ -224,11 +251,50 @@ func (p *Provider) ensureZoneName(ctx context.Context) (string, error) {
 }
 
 func wrapCloudflareTemporary(err error) error {
+	sanitized := sanitizeCloudflareError(err)
 	if !isTemporaryCloudflareError(err) {
+		return sanitized
+	}
+
+	return temporaryError{err: sanitized}
+}
+
+func sanitizeCloudflareError(err error) error {
+	if err == nil {
+		return nil
+	}
+
+	original := errorMessage(err)
+	message := redactSecretMaterial(original)
+	if message == original {
 		return err
 	}
 
-	return temporaryError{err: err}
+	return sanitizedError{err: err, message: message}
+}
+
+func errorMessage(err error) (message string) {
+	defer func() {
+		if recover() != nil {
+			message = fmt.Sprintf("%T", err)
+		}
+	}()
+
+	return err.Error()
+}
+
+var cloudflareSecretPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)authorization\s*:\s*bearer\s+[^\s,;]+`),
+	regexp.MustCompile(`(?i)bearer\s+[^\s,;]+`),
+}
+
+func redactSecretMaterial(message string) string {
+	redacted := message
+	for _, pattern := range cloudflareSecretPatterns {
+		redacted = pattern.ReplaceAllString(redacted, "[redacted]")
+	}
+
+	return redacted
 }
 
 func isTemporaryCloudflareError(err error) bool {

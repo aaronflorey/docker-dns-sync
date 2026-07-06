@@ -908,7 +908,7 @@ func TestCloudflareCreateUpdateAndDeleteClassifyCloudflareIOErrors(t *testing.T)
 			provider := newTestProvider(server.URL)
 			provider.zoneName = "example.com"
 			provider.visible[visibleRecordKey("app.example.com", "10.0.0.10")] = visibleRecordMeta{id: "rec-a"}
-			visible := contracts.VisibleRecord{Hostname: "app.example.com", Answer: "10.0.0.10"}
+			visible := contracts.VisibleRecord{Hostname: "app.example.com", Answer: "10.0.0.10", Provenance: &contracts.RecordProvenance{RemoteID: "rec-a"}}
 
 			_, createErr := provider.Create(context.Background(), contracts.DesiredRecord{Hostname: "app.example.com", Answer: "10.0.0.10"})
 			assertTemporaryClassification(t, createErr, tt.wantTemporary, "create cloudflare dns record")
@@ -922,7 +922,7 @@ func TestCloudflareCreateUpdateAndDeleteClassifyCloudflareIOErrors(t *testing.T)
 	}
 }
 
-func TestCloudflareUpdateAndDeleteUseCachedRecordID(t *testing.T) {
+func TestCloudflareUpdateAndDeleteUseRemoteProvenanceID(t *testing.T) {
 	t.Parallel()
 
 	requests := make(chan map[string]any, 2)
@@ -946,9 +946,8 @@ func TestCloudflareUpdateAndDeleteUseCachedRecordID(t *testing.T) {
 	defer server.Close()
 
 	provider := newTestProvider(server.URL)
-	provider.visible[visibleRecordKey("app.example.com", "10.0.0.10")] = visibleRecordMeta{id: "rec-a"}
 
-	visible := contracts.VisibleRecord{Hostname: "app.example.com", Answer: "10.0.0.10"}
+	visible := contracts.VisibleRecord{Hostname: "app.example.com", Answer: "10.0.0.10", Provenance: &contracts.RecordProvenance{RemoteID: "rec-a"}}
 	provenance, err := provider.Update(context.Background(), visible, contracts.DesiredRecord{Hostname: "app.example.com", Answer: "origin.internal"})
 	if err != nil {
 		t.Fatalf("Update returned error: %v", err)
@@ -970,6 +969,34 @@ func TestCloudflareUpdateAndDeleteUseCachedRecordID(t *testing.T) {
 	}
 }
 
+func TestCloudflareUpdateAndDeleteFailClosedWithoutMatchingRemoteProvenance(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("unexpected Cloudflare mutation request: %s %s", r.Method, r.URL.Path)
+	}))
+	defer server.Close()
+
+	provider := newTestProvider(server.URL)
+	provider.visible[visibleRecordKey("app.example.com", "10.0.0.10")] = visibleRecordMeta{id: "rec-cached"}
+
+	missing := contracts.VisibleRecord{Hostname: "app.example.com", Answer: "10.0.0.10"}
+	if _, err := provider.Update(context.Background(), missing, contracts.DesiredRecord{Hostname: "app.example.com", Answer: "origin.internal"}); err == nil || !strings.Contains(err.Error(), "missing remote provenance") {
+		t.Fatalf("expected update to fail closed without provenance, got %v", err)
+	}
+	if err := provider.Delete(context.Background(), missing); err == nil || !strings.Contains(err.Error(), "missing remote provenance") {
+		t.Fatalf("expected delete to fail closed without provenance, got %v", err)
+	}
+
+	mismatched := contracts.VisibleRecord{Hostname: "app.example.com", Answer: "10.0.0.10", Provenance: &contracts.RecordProvenance{RemoteID: "rec-visible"}}
+	if _, err := provider.Update(context.Background(), mismatched, contracts.DesiredRecord{Hostname: "app.example.com", Answer: "origin.internal"}); err == nil || !strings.Contains(err.Error(), "does not match cached metadata") {
+		t.Fatalf("expected update to fail closed on mismatched provenance, got %v", err)
+	}
+	if err := provider.Delete(context.Background(), mismatched); err == nil || !strings.Contains(err.Error(), "does not match cached metadata") {
+		t.Fatalf("expected delete to fail closed on mismatched provenance, got %v", err)
+	}
+}
+
 func TestCloudflareErrorsDoNotLeakAPIKey(t *testing.T) {
 	t.Parallel()
 
@@ -984,6 +1011,21 @@ func TestCloudflareErrorsDoNotLeakAPIKey(t *testing.T) {
 		t.Fatal("expected error")
 	}
 	assertNoSecretLeak(t, err)
+}
+
+func TestCloudflareErrorSanitizationRedactsAuthHeaderFragments(t *testing.T) {
+	t.Parallel()
+
+	err := wrapCloudflareTemporary(errors.New("upstream failed with Authorization: Bearer cf-secret-token"))
+	assertNoSecretLeak(t, err)
+	if strings.Contains(strings.ToLower(err.Error()), "authorization") || strings.Contains(strings.ToLower(err.Error()), "bearer") {
+		t.Fatalf("expected authorization header fragment to be redacted, got %q", err.Error())
+	}
+
+	temporary := wrapCloudflareTemporary(fmt.Errorf("cloudflare retryable: %w", cloudflareStatusError(t, http.StatusTooManyRequests)))
+	if !isTemporary(temporary) {
+		t.Fatalf("expected temporary classification to survive sanitization")
+	}
 }
 
 func newTestProvider(baseURL string) *Provider {
