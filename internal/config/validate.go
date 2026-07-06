@@ -108,6 +108,12 @@ func Validate(cfg Config) error {
 		return errors.New("logging.format must be one of json or text")
 	}
 
+	if strings.TrimSpace(cfg.Runtime.OperationTimeout) != "" {
+		if err := validateDuration("runtime.operation_timeout", cfg.Runtime.OperationTimeout); err != nil {
+			return err
+		}
+	}
+
 	if err := validateDuration("retry.initial_interval", cfg.Retry.InitialInterval); err != nil {
 		return err
 	}

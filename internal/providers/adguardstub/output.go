@@ -34,12 +34,12 @@ func (p *Provider) ListVisible(context.Context) ([]contracts.VisibleRecord, erro
 	return nil, nil
 }
 
-func (p *Provider) Create(context.Context, contracts.DesiredRecord) error {
-	return nil
+func (p *Provider) Create(context.Context, contracts.DesiredRecord) (*contracts.RecordProvenance, error) {
+	return nil, nil
 }
 
-func (p *Provider) Update(context.Context, contracts.VisibleRecord, contracts.DesiredRecord) error {
-	return nil
+func (p *Provider) Update(context.Context, contracts.VisibleRecord, contracts.DesiredRecord) (*contracts.RecordProvenance, error) {
+	return nil, nil
 }
 
 func (p *Provider) Delete(context.Context, contracts.VisibleRecord) error {

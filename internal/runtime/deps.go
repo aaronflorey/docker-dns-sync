@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -15,6 +16,7 @@ import (
 const (
 	LevelTrace               slog.Level = slog.LevelDebug - 4
 	defaultWatchHintDebounce            = 500 * time.Millisecond
+	defaultOperationTimeout             = 10 * time.Second
 )
 
 type RetryPolicy struct {
@@ -24,10 +26,11 @@ type RetryPolicy struct {
 }
 
 type RuntimeDeps struct {
-	Logger             *slog.Logger
-	LogLevel           slog.Level
-	Retry              RetryPolicy
-	WatchHintDebounce  time.Duration
+	Logger            *slog.Logger
+	LogLevel          slog.Level
+	OperationTimeout  time.Duration
+	Retry             RetryPolicy
+	WatchHintDebounce time.Duration
 }
 
 func NewRuntimeDeps(cfg config.Config) (RuntimeDeps, error) {
@@ -37,6 +40,11 @@ func NewRuntimeDeps(cfg config.Config) (RuntimeDeps, error) {
 	}
 
 	retry, err := parseRetryPolicy(cfg.Retry)
+	if err != nil {
+		return RuntimeDeps{}, err
+	}
+
+	operationTimeout, err := parseOperationTimeout(cfg.Runtime)
 	if err != nil {
 		return RuntimeDeps{}, err
 	}
@@ -55,6 +63,7 @@ func NewRuntimeDeps(cfg config.Config) (RuntimeDeps, error) {
 	return RuntimeDeps{
 		Logger:            slog.New(handler),
 		LogLevel:          level,
+		OperationTimeout:  operationTimeout,
 		Retry:             retry,
 		WatchHintDebounce: defaultWatchHintDebounce,
 	}, nil
@@ -100,6 +109,24 @@ func parseRetryPolicy(cfg config.RetryConfig) (RetryPolicy, error) {
 	}, nil
 }
 
+func parseOperationTimeout(cfg config.RuntimeConfig) (time.Duration, error) {
+	value := strings.TrimSpace(cfg.OperationTimeout)
+	if value == "" {
+		return defaultOperationTimeout, nil
+	}
+
+	duration, err := time.ParseDuration(value)
+	if err != nil {
+		return 0, fmt.Errorf("parse runtime.operation_timeout: %w", err)
+	}
+
+	if duration <= 0 {
+		return 0, fmt.Errorf("runtime.operation_timeout must be greater than zero")
+	}
+
+	return duration, nil
+}
+
 func retryWithBackoff(ctx context.Context, policy RetryPolicy, operation func(attempt int) error, onRetry func(attempt int, delay time.Duration, err error)) error {
 	startedAt := time.Now()
 	delay := policy.InitialInterval
@@ -108,6 +135,9 @@ func retryWithBackoff(ctx context.Context, policy RetryPolicy, operation func(at
 		err := operation(attempt)
 		if err == nil {
 			return nil
+		}
+		if isContextCancellationError(err) {
+			return err
 		}
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -142,4 +172,21 @@ func sleepContext(ctx context.Context, d time.Duration) error {
 	case <-timer.C:
 		return nil
 	}
+}
+
+func withOperationTimeout(parent context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(parent, timeout)
+}
+
+func isContextCancellationError(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+}
+
+func isTemporaryError(err error) bool {
+	if isContextCancellationError(err) {
+		return false
+	}
+
+	var temporaryErr temporaryError
+	return errors.As(err, &temporaryErr) && temporaryErr.Temporary()
 }

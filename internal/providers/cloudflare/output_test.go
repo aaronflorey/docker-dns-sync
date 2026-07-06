@@ -3,7 +3,10 @@ package cloudflare
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -15,6 +18,14 @@ import (
 	cloudflareapi "github.com/cloudflare/cloudflare-go/v6"
 	"github.com/cloudflare/cloudflare-go/v6/option"
 )
+
+type stubTimeoutError struct{}
+
+func (stubTimeoutError) Error() string   { return "timeout" }
+func (stubTimeoutError) Timeout() bool   { return true }
+func (stubTimeoutError) Temporary() bool { return false }
+
+var _ net.Error = stubTimeoutError{}
 
 func TestCloudflareListVisibleCachesRecordMetadata(t *testing.T) {
 	t.Parallel()
@@ -63,6 +74,9 @@ func TestCloudflareListVisibleCachesRecordMetadata(t *testing.T) {
 	}
 	if visible[0].Hostname != "app.example.com" || visible[0].Answer != "10.0.0.10" {
 		t.Fatalf("unexpected first record: %+v", visible[0])
+	}
+	if visible[0].Provenance == nil || visible[0].Provenance.RemoteID != "rec-a" {
+		t.Fatalf("expected visible provenance remote ID rec-a, got %+v", visible[0].Provenance)
 	}
 	if meta, ok := provider.lookupVisibleRecord("app.example.com", "10.0.0.10"); !ok || meta.id != "rec-a" {
 		t.Fatalf("expected cached record metadata, got %+v ok=%v", meta, ok)
@@ -159,6 +173,9 @@ func TestCloudflareListVisibleKeepsFQDN(t *testing.T) {
 	if visible[0].Hostname != "whoami.test.jcaks.net" {
 		t.Fatalf("expected fqdn hostname, got %+v", visible[0])
 	}
+	if visible[0].Provenance == nil || visible[0].Provenance.RemoteID != "rec-a" {
+		t.Fatalf("expected visible provenance remote ID rec-a, got %+v", visible[0].Provenance)
+	}
 }
 
 func TestCloudflareCreateInfersRecordType(t *testing.T) {
@@ -197,8 +214,12 @@ func TestCloudflareCreateInfersRecordType(t *testing.T) {
 			defer server.Close()
 
 			provider := newTestProvider(server.URL)
-			if err := provider.Create(context.Background(), tt.desired); err != nil {
+			provenance, err := provider.Create(context.Background(), tt.desired)
+			if err != nil {
 				t.Fatalf("Create returned error: %v", err)
+			}
+			if provenance == nil || provenance.RemoteID != "rec-new" {
+				t.Fatalf("expected create provenance remote ID rec-new, got %+v", provenance)
 			}
 		})
 	}
@@ -250,9 +271,12 @@ func TestCloudflareCreateRecoversDuplicateRecord(t *testing.T) {
 
 	provider := newTestProvider(server.URL)
 	provider.zoneName = "jcaks.net"
-	err := provider.Create(context.Background(), contracts.DesiredRecord{Hostname: "whoami.test.jcaks.net", Answer: "127.0.0.1"})
+	provenance, err := provider.Create(context.Background(), contracts.DesiredRecord{Hostname: "whoami.test.jcaks.net", Answer: "127.0.0.1"})
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
+	}
+	if provenance == nil || provenance.RemoteID != "rec-a" {
+		t.Fatalf("expected recovered provenance remote ID rec-a, got %+v", provenance)
 	}
 	if got := listCalls.Load(); got != 2 {
 		t.Fatalf("expected two recovery list calls across pagination, got %d", got)
@@ -308,9 +332,12 @@ func TestCloudflareCreateRecoversDuplicateRecordForSingleLabelHostname(t *testin
 
 	provider := newTestProvider(server.URL)
 	provider.zoneName = "example.com"
-	err := provider.Create(context.Background(), contracts.DesiredRecord{Hostname: "agentsview", Answer: "192.168.1.142"})
+	provenance, err := provider.Create(context.Background(), contracts.DesiredRecord{Hostname: "agentsview", Answer: "192.168.1.142"})
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
+	}
+	if provenance == nil || provenance.RemoteID != "rec-a" {
+		t.Fatalf("expected recovered provenance remote ID rec-a, got %+v", provenance)
 	}
 	if got := listCalls.Load(); got != 2 {
 		t.Fatalf("expected two recovery list calls across pagination, got %d", got)
@@ -373,9 +400,12 @@ func TestCloudflareCreateRecoversValidationErrorChainDuplicateRecord(t *testing.
 
 	provider := newTestProvider(server.URL)
 	provider.zoneName = "jcaks.net"
-	err := provider.Create(context.Background(), contracts.DesiredRecord{Hostname: "whoami.test.jcaks.net", Answer: "127.0.0.1"})
+	provenance, err := provider.Create(context.Background(), contracts.DesiredRecord{Hostname: "whoami.test.jcaks.net", Answer: "127.0.0.1"})
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
+	}
+	if provenance == nil || provenance.RemoteID != "rec-a" {
+		t.Fatalf("expected recovered provenance remote ID rec-a, got %+v", provenance)
 	}
 	if got := listCalls.Load(); got != 2 {
 		t.Fatalf("expected two recovery list calls across pagination, got %d", got)
@@ -428,9 +458,12 @@ func TestCloudflareCreateRecoversSameHostCNAMEConflictWhenVisibleRecordMatches(t
 
 	provider := newTestProvider(server.URL)
 	provider.zoneName = "example.com"
-	err := provider.Create(context.Background(), contracts.DesiredRecord{Hostname: "s3.example.com", Answer: "origin.internal"})
+	provenance, err := provider.Create(context.Background(), contracts.DesiredRecord{Hostname: "s3.example.com", Answer: "origin.internal"})
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
+	}
+	if provenance == nil || provenance.RemoteID != "rec-cname" {
+		t.Fatalf("expected recovered provenance remote ID rec-cname, got %+v", provenance)
 	}
 	if got := listCalls.Load(); got != 2 {
 		t.Fatalf("expected two recovery list calls across pagination, got %d", got)
@@ -499,9 +532,12 @@ func TestCloudflareCreateTakesOverUniqueHostnameConflictByUpdatingRecord(t *test
 
 	provider := newTestProvider(server.URL)
 	provider.zoneName = "example.com"
-	err := provider.Create(context.Background(), contracts.DesiredRecord{Hostname: "s3.example.com", Answer: "192.168.1.142"})
+	provenance, err := provider.Create(context.Background(), contracts.DesiredRecord{Hostname: "s3.example.com", Answer: "192.168.1.142"})
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
+	}
+	if provenance == nil || provenance.RemoteID != "rec-cname" {
+		t.Fatalf("expected update provenance remote ID rec-cname, got %+v", provenance)
 	}
 	if got := listCalls.Load(); got != 2 {
 		t.Fatalf("expected two recovery list calls across pagination, got %d", got)
@@ -558,12 +594,15 @@ func TestCloudflareCreateDuplicateWithoutVisibleMatchFails(t *testing.T) {
 
 	provider := newTestProvider(server.URL)
 	provider.zoneName = "jcaks.net"
-	err := provider.Create(context.Background(), contracts.DesiredRecord{Hostname: "app.example.com", Answer: "10.0.0.10"})
+	_, err := provider.Create(context.Background(), contracts.DesiredRecord{Hostname: "app.example.com", Answer: "10.0.0.10"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
 	if !strings.Contains(err.Error(), "create cloudflare dns record") {
 		t.Fatalf("expected wrapped create error, got %v", err)
+	}
+	if _, ok := provider.lookupVisibleRecord("app.example.com", "10.0.0.10"); ok {
+		t.Fatal("expected duplicate conflict to avoid caching unproven ownership")
 	}
 }
 
@@ -603,7 +642,7 @@ func TestCloudflareCreateNSConflictDoesNotAttemptDuplicateRecovery(t *testing.T)
 
 	provider := newTestProvider(server.URL)
 	provider.zoneName = "example.com"
-	err := provider.Create(context.Background(), contracts.DesiredRecord{Hostname: "blog", Answer: "192.0.2.10"})
+	_, err := provider.Create(context.Background(), contracts.DesiredRecord{Hostname: "blog", Answer: "192.0.2.10"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -673,6 +712,216 @@ func TestRecoverableDuplicateRecordError(t *testing.T) {
 	}
 }
 
+func TestWrapCloudflareTemporaryPreservesTemporaryClassificationThroughWrapping(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{name: "request timeout status", err: cloudflareStatusError(t, http.StatusRequestTimeout)},
+		{name: "rate limited status", err: cloudflareStatusError(t, http.StatusTooManyRequests)},
+		{name: "server error status", err: cloudflareStatusError(t, http.StatusBadGateway)},
+		{name: "net timeout", err: stubTimeoutError{}},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			wrapped := fmt.Errorf("outer: %w", wrapCloudflareTemporary(tt.err))
+			var temporary interface{ Temporary() bool }
+			if !errors.As(wrapped, &temporary) || !temporary.Temporary() {
+				t.Fatalf("expected temporary classification for %T", tt.err)
+			}
+		})
+	}
+}
+
+func TestIsTemporaryCloudflareError(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "request timeout status", err: cloudflareStatusError(t, http.StatusRequestTimeout), want: true},
+		{name: "rate limited status", err: cloudflareStatusError(t, http.StatusTooManyRequests), want: true},
+		{name: "server error status", err: cloudflareStatusError(t, http.StatusBadGateway), want: true},
+		{name: "net timeout", err: stubTimeoutError{}, want: true},
+		{name: "context canceled", err: context.Canceled, want: false},
+		{name: "context deadline exceeded", err: context.DeadlineExceeded, want: false},
+		{name: "bad request", err: cloudflareStatusError(t, http.StatusBadRequest), want: false},
+		{name: "unauthorized", err: cloudflareStatusError(t, http.StatusUnauthorized), want: false},
+		{name: "forbidden", err: cloudflareStatusError(t, http.StatusForbidden), want: false},
+		{name: "not found", err: cloudflareStatusError(t, http.StatusNotFound), want: false},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := isTemporaryCloudflareError(tt.err); got != tt.want {
+				t.Fatalf("isTemporaryCloudflareError() = %v, want %v for %T", got, tt.want, tt.err)
+			}
+		})
+	}
+}
+
+func TestCloudflareListVisibleClassifiesZoneLookupErrors(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name           string
+		statusCode     int
+		wantTemporary  bool
+		wantErrSnippet string
+	}{
+		{name: "request timeout", statusCode: http.StatusRequestTimeout, wantTemporary: true, wantErrSnippet: "get cloudflare zone details"},
+		{name: "rate limited", statusCode: http.StatusTooManyRequests, wantTemporary: true, wantErrSnippet: "get cloudflare zone details"},
+		{name: "server error", statusCode: http.StatusBadGateway, wantTemporary: true, wantErrSnippet: "get cloudflare zone details"},
+		{name: "bad request", statusCode: http.StatusBadRequest, wantTemporary: false, wantErrSnippet: "get cloudflare zone details"},
+		{name: "unauthorized", statusCode: http.StatusUnauthorized, wantTemporary: false, wantErrSnippet: "get cloudflare zone details"},
+		{name: "forbidden", statusCode: http.StatusForbidden, wantTemporary: false, wantErrSnippet: "get cloudflare zone details"},
+		{name: "not found", statusCode: http.StatusNotFound, wantTemporary: false, wantErrSnippet: "get cloudflare zone details"},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				assertBearerToken(t, r)
+				if !strings.HasSuffix(r.URL.Path, "/zones/zone-123") {
+					t.Fatalf("unexpected path: %s", r.URL.Path)
+				}
+				w.WriteHeader(tt.statusCode)
+				writeCloudflareJSON(t, w, map[string]any{
+					"result":   nil,
+					"success":  false,
+					"errors":   []map[string]any{{"code": int64(tt.statusCode), "message": http.StatusText(tt.statusCode)}},
+					"messages": []any{},
+				})
+			}))
+			defer server.Close()
+
+			provider := newTestProvider(server.URL)
+			provider.zoneName = ""
+			_, err := provider.ListVisible(context.Background())
+			assertTemporaryClassification(t, err, tt.wantTemporary, tt.wantErrSnippet)
+		})
+	}
+}
+
+func TestCloudflareListVisibleClassifiesPaginationErrors(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name           string
+		statusCode     int
+		wantTemporary  bool
+		wantErrSnippet string
+	}{
+		{name: "request timeout", statusCode: http.StatusRequestTimeout, wantTemporary: true, wantErrSnippet: "list cloudflare dns records"},
+		{name: "rate limited", statusCode: http.StatusTooManyRequests, wantTemporary: true, wantErrSnippet: "list cloudflare dns records"},
+		{name: "server error", statusCode: http.StatusInternalServerError, wantTemporary: true, wantErrSnippet: "list cloudflare dns records"},
+		{name: "bad request", statusCode: http.StatusBadRequest, wantTemporary: false, wantErrSnippet: "list cloudflare dns records"},
+		{name: "unauthorized", statusCode: http.StatusUnauthorized, wantTemporary: false, wantErrSnippet: "list cloudflare dns records"},
+		{name: "forbidden", statusCode: http.StatusForbidden, wantTemporary: false, wantErrSnippet: "list cloudflare dns records"},
+		{name: "not found", statusCode: http.StatusNotFound, wantTemporary: false, wantErrSnippet: "list cloudflare dns records"},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				assertBearerToken(t, r)
+				if !strings.HasSuffix(r.URL.Path, "/zones/zone-123/dns_records") {
+					t.Fatalf("unexpected path: %s", r.URL.Path)
+				}
+				if r.URL.Query().Get("page") == "2" {
+					w.WriteHeader(tt.statusCode)
+					writeCloudflareJSON(t, w, map[string]any{
+						"result":   nil,
+						"success":  false,
+						"errors":   []map[string]any{{"code": int64(tt.statusCode), "message": http.StatusText(tt.statusCode)}},
+						"messages": []any{},
+					})
+					return
+				}
+				writeCloudflareJSON(t, w, map[string]any{
+					"result":      []map[string]any{{"id": "rec-a", "type": "A", "name": "app.example.com", "content": "10.0.0.10"}},
+					"success":     true,
+					"errors":      []any{},
+					"messages":    []any{},
+					"result_info": map[string]any{"page": 1, "per_page": 100},
+				})
+			}))
+			defer server.Close()
+
+			provider := newTestProvider(server.URL)
+			_, err := provider.ListVisible(context.Background())
+			assertTemporaryClassification(t, err, tt.wantTemporary, tt.wantErrSnippet)
+		})
+	}
+}
+
+func TestCloudflareCreateUpdateAndDeleteClassifyCloudflareIOErrors(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name          string
+		statusCode    int
+		wantTemporary bool
+	}{
+		{name: "request timeout", statusCode: http.StatusRequestTimeout, wantTemporary: true},
+		{name: "rate limited", statusCode: http.StatusTooManyRequests, wantTemporary: true},
+		{name: "server error", statusCode: http.StatusBadGateway, wantTemporary: true},
+		{name: "bad request", statusCode: http.StatusBadRequest, wantTemporary: false},
+		{name: "unauthorized", statusCode: http.StatusUnauthorized, wantTemporary: false},
+		{name: "forbidden", statusCode: http.StatusForbidden, wantTemporary: false},
+		{name: "not found", statusCode: http.StatusNotFound, wantTemporary: false},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				assertBearerToken(t, r)
+				w.WriteHeader(tt.statusCode)
+				writeCloudflareJSON(t, w, map[string]any{
+					"result":   nil,
+					"success":  false,
+					"errors":   []map[string]any{{"code": int64(tt.statusCode), "message": http.StatusText(tt.statusCode)}},
+					"messages": []any{},
+				})
+			}))
+			defer server.Close()
+
+			provider := newTestProvider(server.URL)
+			provider.zoneName = "example.com"
+			provider.visible[visibleRecordKey("app.example.com", "10.0.0.10")] = visibleRecordMeta{id: "rec-a"}
+			visible := contracts.VisibleRecord{Hostname: "app.example.com", Answer: "10.0.0.10"}
+
+			_, createErr := provider.Create(context.Background(), contracts.DesiredRecord{Hostname: "app.example.com", Answer: "10.0.0.10"})
+			assertTemporaryClassification(t, createErr, tt.wantTemporary, "create cloudflare dns record")
+
+			_, updateErr := provider.Update(context.Background(), visible, contracts.DesiredRecord{Hostname: "app.example.com", Answer: "origin.internal"})
+			assertTemporaryClassification(t, updateErr, tt.wantTemporary, "update cloudflare dns record")
+
+			deleteErr := provider.Delete(context.Background(), visible)
+			assertTemporaryClassification(t, deleteErr, tt.wantTemporary, "delete cloudflare dns record")
+		})
+	}
+}
+
 func TestCloudflareUpdateAndDeleteUseCachedRecordID(t *testing.T) {
 	t.Parallel()
 
@@ -700,8 +949,12 @@ func TestCloudflareUpdateAndDeleteUseCachedRecordID(t *testing.T) {
 	provider.visible[visibleRecordKey("app.example.com", "10.0.0.10")] = visibleRecordMeta{id: "rec-a"}
 
 	visible := contracts.VisibleRecord{Hostname: "app.example.com", Answer: "10.0.0.10"}
-	if err := provider.Update(context.Background(), visible, contracts.DesiredRecord{Hostname: "app.example.com", Answer: "origin.internal"}); err != nil {
+	provenance, err := provider.Update(context.Background(), visible, contracts.DesiredRecord{Hostname: "app.example.com", Answer: "origin.internal"})
+	if err != nil {
 		t.Fatalf("Update returned error: %v", err)
+	}
+	if provenance == nil || provenance.RemoteID != "rec-a" {
+		t.Fatalf("expected update provenance remote ID rec-a, got %+v", provenance)
 	}
 	if err := provider.Delete(context.Background(), visible); err != nil {
 		t.Fatalf("Delete returned error: %v", err)
@@ -726,13 +979,11 @@ func TestCloudflareErrorsDoNotLeakAPIKey(t *testing.T) {
 	defer server.Close()
 
 	provider := newTestProvider(server.URL)
-	err := provider.Create(context.Background(), contracts.DesiredRecord{Hostname: "app.example.com", Answer: "10.0.0.10"})
+	_, err := provider.Create(context.Background(), contracts.DesiredRecord{Hostname: "app.example.com", Answer: "10.0.0.10"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if strings.Contains(err.Error(), "cf-secret-token") {
-		t.Fatalf("error leaked api key: %q", err.Error())
-	}
+	assertNoSecretLeak(t, err)
 }
 
 func newTestProvider(baseURL string) *Provider {
@@ -744,6 +995,58 @@ func newTestProvider(baseURL string) *Provider {
 	)
 	provider.zoneName = "unit.test"
 	return provider
+}
+
+func cloudflareStatusError(t *testing.T, statusCode int) error {
+	t.Helper()
+	body, err := json.Marshal(map[string]any{
+		"result":   nil,
+		"success":  false,
+		"errors":   []map[string]any{{"code": int64(statusCode), "message": http.StatusText(statusCode)}},
+		"messages": []any{},
+	})
+	if err != nil {
+		t.Fatalf("marshal body: %v", err)
+	}
+
+	var apiErr cloudflareapi.Error
+	if err := json.Unmarshal(body, &apiErr); err != nil {
+		t.Fatalf("unmarshal error body: %v", err)
+	}
+	apiErr.StatusCode = statusCode
+
+	return &apiErr
+}
+
+func assertTemporaryClassification(t *testing.T, err error, wantTemporary bool, wantErrSnippet string) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), wantErrSnippet) {
+		t.Fatalf("expected error containing %q, got %v", wantErrSnippet, err)
+	}
+	assertNoSecretLeak(t, err)
+
+	gotTemporary := isTemporary(err)
+	if gotTemporary != wantTemporary {
+		t.Fatalf("temporary classification = %v, want %v for %v", gotTemporary, wantTemporary, err)
+	}
+}
+
+func isTemporary(err error) bool {
+	var temporary interface{ Temporary() bool }
+	return errors.As(err, &temporary) && temporary.Temporary()
+}
+
+func assertNoSecretLeak(t *testing.T, err error) {
+	t.Helper()
+	message := err.Error()
+	for _, secret := range []string{"cf-secret-token", "Bearer cf-secret-token", "Authorization: Bearer cf-secret-token", "authorization: Bearer cf-secret-token"} {
+		if strings.Contains(message, secret) {
+			t.Fatalf("error leaked secret material %q: %q", secret, message)
+		}
+	}
 }
 
 func assertBearerToken(t *testing.T, r *http.Request) {

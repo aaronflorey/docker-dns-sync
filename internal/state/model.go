@@ -14,11 +14,12 @@ type Snapshot struct {
 }
 
 type ManagedRecord struct {
-	Output        contracts.ProviderRef     `json:"output"`
-	Source        contracts.SourceObjectRef `json:"source"`
-	Hostname      string                    `json:"hostname"`
-	Answer        string                    `json:"answer"`
-	LastAppliedAt time.Time                 `json:"last_applied_at"`
+	Output        contracts.ProviderRef       `json:"output"`
+	Source        contracts.SourceObjectRef   `json:"source"`
+	Hostname      string                      `json:"hostname"`
+	Answer        string                      `json:"answer"`
+	Provenance    *contracts.RecordProvenance `json:"provenance,omitempty"`
+	LastAppliedAt time.Time                   `json:"last_applied_at"`
 }
 
 func EmptySnapshot() Snapshot {

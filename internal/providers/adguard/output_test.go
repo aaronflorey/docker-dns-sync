@@ -48,6 +48,9 @@ func TestAdGuardListVisibleRewriteList(t *testing.T) {
 	if visible[0].Hostname != "APP.local" || visible[0].Answer != "10.0.0.10" {
 		t.Fatalf("unexpected record mapping: %+v", visible[0])
 	}
+	if visible[0].Provenance != nil {
+		t.Fatalf("expected adguard visible rewrite provenance to be unavailable, got %+v", visible[0].Provenance)
+	}
 }
 
 func TestAdGuardCreateRewriteAdd(t *testing.T) {
@@ -68,7 +71,7 @@ func TestAdGuardCreateRewriteAdd(t *testing.T) {
 
 	provider := New(config.OutputConfig{Type: "adguard", Name: "primary", URL: testServer.URL, Username: "admin", Password: "supersecret"})
 
-	err := provider.Create(context.Background(), contracts.DesiredRecord{Hostname: "app.local", Answer: "10.0.0.10"})
+	_, err := provider.Create(context.Background(), contracts.DesiredRecord{Hostname: "app.local", Answer: "10.0.0.10"})
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
@@ -95,7 +98,7 @@ func TestAdGuardUpdateRewriteUpdate(t *testing.T) {
 
 	provider := New(config.OutputConfig{Type: "adguard", Name: "primary", URL: testServer.URL, Username: "admin", Password: "supersecret"})
 
-	err := provider.Update(
+	_, err := provider.Update(
 		context.Background(),
 		contracts.VisibleRecord{Hostname: "app.local", Answer: "10.0.0.10"},
 		contracts.DesiredRecord{Hostname: "app.local", Answer: "10.0.0.11"},
@@ -138,7 +141,7 @@ func TestAdGuardErrorsDoNotLeakCredentials(t *testing.T) {
 	defer testServer.Close()
 
 	provider := New(config.OutputConfig{Type: "adguard", Name: "primary", URL: testServer.URL, Username: "admin", Password: "supersecret"})
-	err := provider.Create(context.Background(), contracts.DesiredRecord{Hostname: "app.local", Answer: "10.0.0.10"})
+	_, err := provider.Create(context.Background(), contracts.DesiredRecord{Hostname: "app.local", Answer: "10.0.0.10"})
 	if err == nil {
 		t.Fatalf("expected error")
 	}
@@ -157,7 +160,7 @@ func TestAdGuardCreateMarksTemporaryServerFailuresRetryable(t *testing.T) {
 	defer testServer.Close()
 
 	provider := New(config.OutputConfig{Type: "adguard", Name: "primary", URL: testServer.URL, Username: "admin", Password: "supersecret"})
-	err := provider.Create(context.Background(), contracts.DesiredRecord{Hostname: "app.local", Answer: "10.0.0.10"})
+	_, err := provider.Create(context.Background(), contracts.DesiredRecord{Hostname: "app.local", Answer: "10.0.0.10"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -177,7 +180,7 @@ func TestAdGuardCreateLeavesBadRequestFailuresTerminal(t *testing.T) {
 	defer testServer.Close()
 
 	provider := New(config.OutputConfig{Type: "adguard", Name: "primary", URL: testServer.URL, Username: "admin", Password: "supersecret"})
-	err := provider.Create(context.Background(), contracts.DesiredRecord{Hostname: "app.local", Answer: "10.0.0.10"})
+	_, err := provider.Create(context.Background(), contracts.DesiredRecord{Hostname: "app.local", Answer: "10.0.0.10"})
 	if err == nil {
 		t.Fatal("expected error")
 	}

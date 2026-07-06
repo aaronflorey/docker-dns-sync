@@ -18,6 +18,7 @@ The TOML file must define these top-level sections:
 - `[[outputs]]`
 - `[state]`
 - `[logging]`
+- `[runtime]`
 - `[retry]`
 
 The config is parsed first, then validated, then secret references are resolved from the process environment.
@@ -82,6 +83,14 @@ State is written atomically with JSON encoding and `0600` permissions where supp
 | `level` | `debug`, `info`, `warn`, `error` | Invalid values fail validation. |
 | `format` | `json`, `text` | Output is written to stderr. |
 
+## Runtime
+
+| Key | Notes |
+| --- | --- |
+| `operation_timeout` | Optional Go duration string. Defaults to `10s`. Applied per source/output read or write operation (`ListDesired`, `ListVisible`, `Create`, `Update`, `Delete`). |
+
+This timeout is not a global reconcile deadline and does not wrap long-lived `Watch(ctx)` streams. Retry handling starts only after an operation returns successfully or fails, including when it fails by timing out.
+
 ## Retry
 
 | Key | Notes |
@@ -90,7 +99,7 @@ State is written atomically with JSON encoding and `0600` permissions where supp
 | `max_interval` | Required Go duration string, greater than zero. |
 | `max_elapsed_time` | Required Go duration string, greater than zero. |
 
-These values control bounded backoff during reconcile and watch-reconnect recovery.
+These values control bounded backoff during reconcile and watch-reconnect recovery. They do not shorten in-flight provider calls; retries begin only after the per-operation runtime timeout fires or the operation returns on its own.
 
 ## Label-driven record derivation
 
@@ -103,7 +112,7 @@ Docker sources interpret these labels:
 - `proxy.#<n>.port` and `proxy.*.port` provide indexed and wildcard ports.
 - `proxy.<alias>.host`, `proxy.#<n>.host`, and `proxy.*.host` override the answer target.
 
-When a container stops producing a desired record because labels changed, the daemon drops ownership from local state and leaves the remote DNS record in place. This avoids deleting a record that an operator may want to keep or manage manually later, but it also means label changes do not clean up remote DNS automatically.
+When a container stops producing a desired record because labels changed, stale remote cleanup is only attempted when the output can prove exactly one visible same-key record is daemon-owned. That proof requires non-empty daemon-owned provenance on the visible record. Same-key matches without provenance, ambiguous duplicates, and unmanaged/manual records are preserved to avoid deleting operator-owned DNS. In practice, providers that cannot surface that provenance during listing leave the remote record in place even if local ownership was previously tracked.
 
 Lookup precedence for host overrides is:
 

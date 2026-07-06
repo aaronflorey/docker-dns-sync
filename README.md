@@ -18,7 +18,7 @@
 - Performs a full reconcile on startup using Docker snapshot state and the persisted ownership file.
 - Watches Docker for container lifecycle hints and reruns reconciliation after changes.
 - Retries temporary AdGuard failures with bounded backoff before giving up.
-- Only mutates rewrites that already belong to the daemon state file.
+- Only deletes stale remote rewrites when exactly one visible record carries non-empty daemon-owned provenance; same-key records without provenance, ambiguous duplicates, and unrelated manual records are preserved instead of being deleted on label changes alone.
 
 ## Configuration
 
@@ -36,7 +36,10 @@ Required config sections:
 - `[[outputs]]` for AdGuard Home connectivity.
 - `[state]` for the writable ownership snapshot path.
 - `[logging]` for log level and format.
+- `[runtime]` for per-operation timeouts on provider reads and writes.
 - `[retry]` for bounded backoff settings.
+
+`[runtime] operation_timeout` defaults to `10s`. It applies per source/output read or write call (`ListDesired`, `ListVisible`, `Create`, `Update`, `Delete`), not to `Watch(ctx)` streams and not to the full reconcile pass. Retry backoff starts only after an operation returns or times out.
 
 For Docker sources, set `sources[].host_ip` to the host-reachable IP address that unlabeled records should answer with. Explicit `proxy.<alias>.host`, `proxy.#<n>.host`, and `proxy.*.host` labels still override that shared source IP.
 
@@ -51,7 +54,7 @@ Use `password_ref = "ENV:ADGUARD_PASSWORD"` instead of embedding credentials in 
 - Live verification requires `docker`, `docker compose`, and `curl`; `dig` is optional because the script falls back to containerized `nslookup`.
 - The live test is not part of the default Docker-free `go test` / `go vet` path and cleans up with `docker compose ... down -v` plus temporary runtime directory removal unless `--keep-running` or `KEEP_RUNNING=1` is used; keep-running mode prints the manual cleanup commands you must run after inspection.
 - Keep secrets out of logs and shell history: use env references, do not paste real credentials inline, and avoid dumping compose logs by default.
-- Stale-owned remote rewrite deletion coverage is intentionally deferred until `.weave/plans/stale-owned-remote-cleanup.md` lands.
+- Stale remote cleanup is intentionally conservative: deletion requires unique daemon-owned provenance that the output can still see. Providers that cannot expose that proof, such as current AdGuard rewrite listing, leave same-key records in place rather than risk deleting operator-managed DNS.
 - Renovate is configured through `renovate.json` for Go modules, GitHub Actions, and container image references.
 
 ## Release Automation

@@ -89,6 +89,26 @@ func TestValidateRuntimeAndCredentialFields(t *testing.T) {
 			wantErr: "retry.max_interval must be a valid duration",
 		},
 		{
+			name: "invalid runtime operation timeout",
+			mutate: func(cfg *Config) {
+				cfg.Runtime.OperationTimeout = "later"
+			},
+			wantErr: "runtime.operation_timeout must be a valid duration",
+		},
+		{
+			name: "non-positive runtime operation timeout",
+			mutate: func(cfg *Config) {
+				cfg.Runtime.OperationTimeout = "0s"
+			},
+			wantErr: "runtime.operation_timeout must be greater than zero",
+		},
+		{
+			name: "positive runtime operation timeout is valid",
+			mutate: func(cfg *Config) {
+				cfg.Runtime.OperationTimeout = "10s"
+			},
+		},
+		{
 			name: "missing credential source",
 			mutate: func(cfg *Config) {
 				cfg.Outputs[0].Password = ""
@@ -288,6 +308,7 @@ func validConfig() Config {
 			Level:  "info",
 			Format: "json",
 		},
+		Runtime: RuntimeConfig{},
 		Retry: RetryConfig{
 			InitialInterval: "1s",
 			MaxInterval:     "30s",

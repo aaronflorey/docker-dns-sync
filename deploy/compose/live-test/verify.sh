@@ -218,4 +218,6 @@ wait_for_rewrite "$MANAGED_DOMAIN" "$MANAGED_ORIGINAL_ANSWER"
 wait_for_dns "$MANAGED_DOMAIN" "$MANAGED_ORIGINAL_ANSWER"
 wait_for_rewrite "$MANUAL_DOMAIN" "$MANUAL_ANSWER"
 
+log "verify: skipping stale-delete live assertion; AdGuard visible rewrites do not expose unique provenance for same-key ownership proof"
+
 log "verify: live-test smoke passed"

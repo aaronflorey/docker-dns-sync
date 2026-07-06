@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"path/filepath"
@@ -88,12 +89,11 @@ func TestAppReconcileOnceFiltersDesiredRecordsPerOutput(t *testing.T) {
 
 	app := New(testRuntimeConfig(statePath))
 	app.store = store
-	app.sources = []contracts.Source{&startupSourceStub{provider: sourceRef.Provider, desired: []contracts.DesiredRecord{
+	setTestProviders(app, testRuntimeDeps(RetryPolicy{}, 0), []contracts.Source{&startupSourceStub{provider: sourceRef.Provider, desired: []contracts.DesiredRecord{
 		{Hostname: "shared.local", Answer: "10.0.0.10", Source: sourceRef},
 		{Hostname: "adguard.local", Answer: "10.0.0.11", Source: sourceRef, Output: "adguard"},
 		{Hostname: "cloudflare.local", Answer: "10.0.0.12", Source: sourceRef, Output: "cloudflare"},
-	}}}
-	app.outputs = []contracts.Output{adguardOutput, cloudflareOutput}
+	}}}, []contracts.Output{adguardOutput, cloudflareOutput})
 
 	if err := app.reconcileOnce(context.Background()); err != nil {
 		t.Fatalf("reconcile once: %v", err)
@@ -117,6 +117,343 @@ func TestAppReconcileOnceFiltersDesiredRecordsPerOutput(t *testing.T) {
 	}
 }
 
+func TestAppReconcileOnceAppliesOperationTimeoutToWrappedSourcesAndOutputs(t *testing.T) {
+	t.Parallel()
+
+	statePath := filepath.Join(t.TempDir(), "state.json")
+	store, err := state.NewStore(statePath)
+	if err != nil {
+		t.Fatalf("create state store: %v", err)
+	}
+
+	timeout := 50 * time.Millisecond
+	deps := testRuntimeDeps(RetryPolicy{}, 0)
+	deps.OperationTimeout = timeout
+
+	source := &deadlineObservingSourceStub{provider: contracts.ProviderRef{Type: "docker", Name: "local"}}
+	output := &deadlineObservingOutputStub{provider: contracts.ProviderRef{Type: "adguard", Name: "primary"}}
+
+	app := New(testRuntimeConfig(statePath))
+	app.store = store
+	setTestProviders(app, deps, []contracts.Source{source}, []contracts.Output{output})
+
+	startedAt := time.Now()
+	if err := app.reconcileOnce(context.Background()); err != nil {
+		t.Fatalf("reconcile once: %v", err)
+	}
+	finishedAt := time.Now()
+
+	assertObservedDeadline(t, source.observedDeadline(), startedAt, finishedAt, timeout)
+	assertObservedDeadline(t, output.observedDeadline(), startedAt, finishedAt, timeout)
+}
+
+func TestReconcileReturnsPromptlyAfterSourceListTimeout(t *testing.T) {
+	t.Parallel()
+
+	statePath := filepath.Join(t.TempDir(), "state.json")
+	store, err := state.NewStore(statePath)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	timeout := 100 * time.Millisecond
+	assertionWindow := 500 * time.Millisecond
+	deps := testRuntimeDeps(RetryPolicy{
+		InitialInterval: 350 * time.Millisecond,
+		MaxInterval:     350 * time.Millisecond,
+		MaxElapsedTime:  2 * time.Second,
+	}, 0)
+	deps.OperationTimeout = timeout
+
+	source := &blockingSourceStub{provider: contracts.ProviderRef{Type: "docker", Name: "local"}}
+	output := &startupOutputStub{provider: contracts.ProviderRef{Type: "adguard", Name: "primary"}}
+
+	app := New(testRuntimeConfig(statePath))
+	app.store = store
+	setTestProviders(app, deps, []contracts.Source{source}, []contracts.Output{output})
+
+	startedAt, finishedAt, err := runReconcileWithin(t, app, timeout, assertionWindow)
+	assertTimeoutError(t, err)
+	assertObservedDeadline(t, source.observedDeadline(), startedAt, finishedAt, timeout)
+	if got := source.listDesiredCallCount(); got != 1 {
+		t.Fatalf("expected 1 ListDesired call without retry, got %d", got)
+	}
+	if got := output.listVisibleCount(); got != 0 {
+		t.Fatalf("expected no ListVisible calls after source timeout, got %d", got)
+	}
+}
+
+func TestReconcileReturnsPromptlyAfterOutputListTimeout(t *testing.T) {
+	t.Parallel()
+
+	statePath := filepath.Join(t.TempDir(), "state.json")
+	store, err := state.NewStore(statePath)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	timeout := 100 * time.Millisecond
+	assertionWindow := 500 * time.Millisecond
+	deps := testRuntimeDeps(RetryPolicy{
+		InitialInterval: 350 * time.Millisecond,
+		MaxInterval:     350 * time.Millisecond,
+		MaxElapsedTime:  2 * time.Second,
+	}, 0)
+	deps.OperationTimeout = timeout
+
+	provider := contracts.ProviderRef{Type: "docker", Name: "local"}
+	source := &startupSourceStub{provider: provider, desired: []contracts.DesiredRecord{{
+		Hostname: "app.local",
+		Answer:   "10.0.0.10",
+		Source:   contracts.SourceObjectRef{Provider: provider, ID: "ctr-1", DisplayName: "svc"},
+	}}}
+	output := &blockingOutputStub{provider: contracts.ProviderRef{Type: "adguard", Name: "primary"}, blockOperation: blockingOutputListVisible}
+
+	app := New(testRuntimeConfig(statePath))
+	app.store = store
+	setTestProviders(app, deps, []contracts.Source{source}, []contracts.Output{output})
+
+	startedAt, finishedAt, err := runReconcileWithin(t, app, timeout, assertionWindow)
+	assertTimeoutError(t, err)
+	assertObservedDeadline(t, output.observedDeadline(blockingOutputListVisible), startedAt, finishedAt, timeout)
+	if got := source.listDesiredCallCount(); got != 1 {
+		t.Fatalf("expected 1 ListDesired call without retry, got %d", got)
+	}
+	if got := output.listVisibleCount(); got != 1 {
+		t.Fatalf("expected 1 ListVisible call without retry, got %d", got)
+	}
+	if got := output.createCount(); got != 0 {
+		t.Fatalf("expected no Create calls after output list timeout, got %d", got)
+	}
+}
+
+func TestReconcileReturnsPromptlyAfterOutputMutationTimeout(t *testing.T) {
+	t.Parallel()
+
+	provider := contracts.ProviderRef{Type: "docker", Name: "local"}
+	outputProvider := contracts.ProviderRef{Type: "adguard", Name: "primary"}
+	sourceRef := contracts.SourceObjectRef{Provider: provider, ID: "ctr-1", DisplayName: "svc"}
+
+	tests := []struct {
+		name       string
+		operation  blockingOutputOperation
+		seedOwned  []state.ManagedRecord
+		desired    []contracts.DesiredRecord
+		visible    []contracts.VisibleRecord
+		wantCreate int
+		wantUpdate int
+		wantDelete int
+	}{
+		{
+			name:      "create",
+			operation: blockingOutputCreate,
+			desired: []contracts.DesiredRecord{{
+				Hostname: "create.local",
+				Answer:   "10.0.0.10",
+				Source:   sourceRef,
+			}},
+			wantCreate: 1,
+		},
+		{
+			name:      "update",
+			operation: blockingOutputUpdate,
+			seedOwned: []state.ManagedRecord{{
+				Output:     outputProvider,
+				Source:     sourceRef,
+				Hostname:   "update.local",
+				Answer:     "10.0.0.20",
+				Provenance: &contracts.RecordProvenance{RemoteID: "update-rec"},
+			}},
+			desired: []contracts.DesiredRecord{{
+				Hostname: "update.local",
+				Answer:   "10.0.0.21",
+				Source:   sourceRef,
+			}},
+			visible: []contracts.VisibleRecord{{
+				Output:     outputProvider,
+				Hostname:   "update.local",
+				Answer:     "10.0.0.20",
+				Provenance: &contracts.RecordProvenance{RemoteID: "update-rec"},
+			}},
+			wantUpdate: 1,
+		},
+		{
+			name:      "delete",
+			operation: blockingOutputDelete,
+			seedOwned: []state.ManagedRecord{{
+				Output:     outputProvider,
+				Source:     sourceRef,
+				Hostname:   "delete.local",
+				Answer:     "10.0.0.30",
+				Provenance: &contracts.RecordProvenance{RemoteID: "delete-rec"},
+			}},
+			visible: []contracts.VisibleRecord{{
+				Output:     outputProvider,
+				Hostname:   "delete.local",
+				Answer:     "10.0.0.30",
+				Provenance: &contracts.RecordProvenance{RemoteID: "delete-rec"},
+			}},
+			wantDelete: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		tc := tt
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			statePath := filepath.Join(t.TempDir(), "state.json")
+			store, err := state.NewStore(statePath)
+			if err != nil {
+				t.Fatalf("create store: %v", err)
+			}
+			if len(tc.seedOwned) > 0 {
+				if err := store.Save(state.Snapshot{ManagedRecords: append([]state.ManagedRecord(nil), tc.seedOwned...)}); err != nil {
+					t.Fatalf("seed state store: %v", err)
+				}
+			}
+
+			timeout := 100 * time.Millisecond
+			assertionWindow := 500 * time.Millisecond
+			deps := testRuntimeDeps(RetryPolicy{
+				InitialInterval: 350 * time.Millisecond,
+				MaxInterval:     350 * time.Millisecond,
+				MaxElapsedTime:  2 * time.Second,
+			}, 0)
+			deps.OperationTimeout = timeout
+
+			source := &startupSourceStub{provider: provider, desired: append([]contracts.DesiredRecord(nil), tc.desired...)}
+			output := &blockingOutputStub{
+				provider:       outputProvider,
+				visible:        append([]contracts.VisibleRecord(nil), tc.visible...),
+				blockOperation: tc.operation,
+			}
+
+			app := New(testRuntimeConfig(statePath))
+			app.store = store
+			setTestProviders(app, deps, []contracts.Source{source}, []contracts.Output{output})
+
+			startedAt, finishedAt, err := runReconcileWithin(t, app, timeout, assertionWindow)
+			assertTimeoutError(t, err)
+			assertObservedDeadline(t, output.observedDeadline(tc.operation), startedAt, finishedAt, timeout)
+			if got := source.listDesiredCallCount(); got != 1 {
+				t.Fatalf("expected 1 ListDesired call without retry, got %d", got)
+			}
+			if got := output.listVisibleCount(); got != 1 {
+				t.Fatalf("expected 1 ListVisible call without retry, got %d", got)
+			}
+			if got := output.createCount(); got != tc.wantCreate {
+				t.Fatalf("expected %d Create calls, got %d", tc.wantCreate, got)
+			}
+			if got := output.updateCount(); got != tc.wantUpdate {
+				t.Fatalf("expected %d Update calls, got %d", tc.wantUpdate, got)
+			}
+			if got := output.deleteCount(); got != tc.wantDelete {
+				t.Fatalf("expected %d Delete calls, got %d", tc.wantDelete, got)
+			}
+		})
+	}
+}
+
+func TestReconcileDoesNotRetryTemporaryContextCancellationErrors(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name            string
+		err             error
+		source          contracts.Source
+		output          contracts.Output
+		wantSourceCalls int
+		wantListVisible int
+		wantCreateCalls int
+		wantDeleteCalls int
+	}{
+		{
+			name:            "source deadline exceeded",
+			err:             stubTemporaryError{err: context.DeadlineExceeded},
+			source:          &errorSourceStub{provider: contracts.ProviderRef{Type: "docker", Name: "local"}, err: stubTemporaryError{err: context.DeadlineExceeded}},
+			output:          &startupOutputStub{provider: contracts.ProviderRef{Type: "adguard", Name: "primary"}},
+			wantSourceCalls: 1,
+		},
+		{
+			name: "output canceled",
+			err:  stubTemporaryError{err: context.Canceled},
+			source: &startupSourceStub{provider: contracts.ProviderRef{Type: "docker", Name: "local"}, desired: []contracts.DesiredRecord{{
+				Hostname: "app.local",
+				Answer:   "10.0.0.10",
+				Source:   contracts.SourceObjectRef{Provider: contracts.ProviderRef{Type: "docker", Name: "local"}, ID: "ctr-1", DisplayName: "svc"},
+			}}},
+			output:          &errorOutputStub{provider: contracts.ProviderRef{Type: "adguard", Name: "primary"}, listErr: stubTemporaryError{err: context.Canceled}},
+			wantSourceCalls: 1,
+			wantListVisible: 1,
+		},
+		{
+			name: "output mutation deadline exceeded",
+			err:  stubTemporaryError{err: context.DeadlineExceeded},
+			source: &startupSourceStub{provider: contracts.ProviderRef{Type: "docker", Name: "local"}, desired: []contracts.DesiredRecord{{
+				Hostname: "app.local",
+				Answer:   "10.0.0.10",
+				Source:   contracts.SourceObjectRef{Provider: contracts.ProviderRef{Type: "docker", Name: "local"}, ID: "ctr-1", DisplayName: "svc"},
+			}}},
+			output:          &errorOutputStub{provider: contracts.ProviderRef{Type: "adguard", Name: "primary"}, createErr: stubTemporaryError{err: context.DeadlineExceeded}},
+			wantSourceCalls: 1,
+			wantListVisible: 1,
+			wantCreateCalls: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		tc := tt
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			statePath := filepath.Join(t.TempDir(), "state.json")
+			store, err := state.NewStore(statePath)
+			if err != nil {
+				t.Fatalf("create store: %v", err)
+			}
+
+			deps := testRuntimeDeps(RetryPolicy{
+				InitialInterval: 350 * time.Millisecond,
+				MaxInterval:     350 * time.Millisecond,
+				MaxElapsedTime:  2 * time.Second,
+			}, 0)
+
+			app := New(testRuntimeConfig(statePath))
+			app.store = store
+			setTestProviders(app, deps, []contracts.Source{tc.source}, []contracts.Output{tc.output})
+
+			_, _, err = runReconcileWithin(t, app, 0, 100*time.Millisecond)
+			if !errors.Is(err, tc.err) {
+				t.Fatalf("expected reconcile to return %v, got %v", tc.err, err)
+			}
+
+			switch source := tc.source.(type) {
+			case *errorSourceStub:
+				if got := source.listDesiredCallCount(); got != tc.wantSourceCalls {
+					t.Fatalf("expected %d ListDesired calls, got %d", tc.wantSourceCalls, got)
+				}
+			case *startupSourceStub:
+				if got := source.listDesiredCallCount(); got != tc.wantSourceCalls {
+					t.Fatalf("expected %d ListDesired calls, got %d", tc.wantSourceCalls, got)
+				}
+			}
+
+			if output, ok := tc.output.(*errorOutputStub); ok {
+				if got := output.listVisibleCount(); got != tc.wantListVisible {
+					t.Fatalf("expected %d ListVisible calls, got %d", tc.wantListVisible, got)
+				}
+				if got := output.createCount(); got != tc.wantCreateCalls {
+					t.Fatalf("expected %d Create calls, got %d", tc.wantCreateCalls, got)
+				}
+				if got := output.deleteCount(); got != tc.wantDeleteCalls {
+					t.Fatalf("expected %d Delete calls, got %d", tc.wantDeleteCalls, got)
+				}
+			}
+		})
+	}
+}
+
 func TestAppRunStartupUpdatesOwnedHostnameWhenVisibleRecordDrifted(t *testing.T) {
 	t.Parallel()
 
@@ -130,17 +467,18 @@ func TestAppRunStartupUpdatesOwnedHostnameWhenVisibleRecordDrifted(t *testing.T)
 		t.Fatalf("create state store: %v", err)
 	}
 	if err := store.Save(state.Snapshot{ManagedRecords: []state.ManagedRecord{{
-		Output:   provider,
-		Source:   oldSourceRef,
-		Hostname: "s3.local",
-		Answer:   "origin.internal",
+		Output:     provider,
+		Source:     oldSourceRef,
+		Hostname:   "s3.local",
+		Answer:     "origin.internal",
+		Provenance: &contracts.RecordProvenance{RemoteID: "rec-existing"},
 	}}}); err != nil {
 		t.Fatalf("seed state store: %v", err)
 	}
 
 	output := &startupOutputStub{
 		provider: provider,
-		visible:  []contracts.VisibleRecord{{Output: provider, Hostname: "s3.local", Answer: "legacy.internal"}},
+		visible:  []contracts.VisibleRecord{{Output: provider, Hostname: "s3.local", Answer: "legacy.internal", Provenance: &contracts.RecordProvenance{RemoteID: "rec-existing"}}},
 	}
 	app := New(testRuntimeConfig(statePath))
 	app.registry = testRegistry(
@@ -189,17 +527,18 @@ func TestAppRunStartupUpdatesOwnedHostnameWhenContainerIdentityChanges(t *testin
 		t.Fatalf("create state store: %v", err)
 	}
 	if err := store.Save(state.Snapshot{ManagedRecords: []state.ManagedRecord{{
-		Output:   provider,
-		Source:   oldSourceRef,
-		Hostname: "s3.local",
-		Answer:   "origin.internal",
+		Output:     provider,
+		Source:     oldSourceRef,
+		Hostname:   "s3.local",
+		Answer:     "origin.internal",
+		Provenance: &contracts.RecordProvenance{RemoteID: "rec-existing"},
 	}}}); err != nil {
 		t.Fatalf("seed state store: %v", err)
 	}
 
 	output := &startupOutputStub{
 		provider: provider,
-		visible:  []contracts.VisibleRecord{{Output: provider, Hostname: "s3.local", Answer: "legacy.internal"}},
+		visible:  []contracts.VisibleRecord{{Output: provider, Hostname: "s3.local", Answer: "legacy.internal", Provenance: &contracts.RecordProvenance{RemoteID: "rec-existing"}}},
 	}
 	app := New(testRuntimeConfig(statePath))
 	app.registry = testRegistry(
@@ -233,6 +572,269 @@ func TestAppRunStartupUpdatesOwnedHostnameWhenContainerIdentityChanges(t *testin
 
 	cancel()
 	assertRunStops(t, done)
+}
+
+func TestAppRunStartupDeletesSeededStaleOwnedRecordWithMatchingProvenanceAndPersistsEmptyState(t *testing.T) {
+	t.Parallel()
+
+	provider := contracts.ProviderRef{Type: "adguard", Name: "primary"}
+	sourceRef := contracts.SourceObjectRef{Provider: contracts.ProviderRef{Type: "docker", Name: "local"}, ID: "ctr-1", DisplayName: "svc"}
+	statePath := filepath.Join(t.TempDir(), "state.json")
+
+	store, err := state.NewStore(statePath)
+	if err != nil {
+		t.Fatalf("create state store: %v", err)
+	}
+	seed := state.Snapshot{ManagedRecords: []state.ManagedRecord{{
+		Output:     provider,
+		Source:     sourceRef,
+		Hostname:   "old.local",
+		Answer:     "10.0.0.12",
+		Provenance: &contracts.RecordProvenance{RemoteID: "rec-stale"},
+	}}}
+	if err := store.Save(seed); err != nil {
+		t.Fatalf("seed state store: %v", err)
+	}
+
+	deleteObserved := make(chan state.Snapshot, 1)
+	deleteErrs := make(chan error, 1)
+	output := &startupOutputStub{
+		provider: provider,
+		visible: []contracts.VisibleRecord{{
+			Output:     provider,
+			Hostname:   "OLD.local",
+			Answer:     "10.0.0.12",
+			Provenance: &contracts.RecordProvenance{RemoteID: "rec-stale"},
+		}},
+		onDelete: func() {
+			snapshot, err := store.Load()
+			if err != nil {
+				deleteErrs <- err
+				return
+			}
+			deleteObserved <- snapshot
+		},
+	}
+	app := New(testRuntimeConfig(statePath))
+	app.registry = testRegistry(
+		stubSourceFactory{source: &startupSourceStub{provider: sourceRef.Provider}},
+		stubOutputFactory{output: output},
+	)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- app.Run(ctx)
+	}()
+
+	waitForCondition(t, func() bool {
+		return output.deleteCount() == 1
+	})
+
+	select {
+	case err := <-deleteErrs:
+		t.Fatalf("load state during delete: %v", err)
+	case snapshot := <-deleteObserved:
+		if len(snapshot.ManagedRecords) != 1 {
+			t.Fatalf("expected seeded state to remain persisted during delete, got %+v", snapshot.ManagedRecords)
+		}
+		got := snapshot.ManagedRecords[0]
+		if got.Output != seed.ManagedRecords[0].Output || got.Source != seed.ManagedRecords[0].Source || got.Hostname != seed.ManagedRecords[0].Hostname || got.Answer != seed.ManagedRecords[0].Answer || got.Provenance == nil || got.Provenance.RemoteID != "rec-stale" {
+			t.Fatalf("expected seeded state to remain persisted during delete, got %+v", snapshot.ManagedRecords)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out observing delete ordering")
+	}
+
+	snapshot, err := store.Load()
+	if err != nil {
+		t.Fatalf("load persisted snapshot: %v", err)
+	}
+	if got := output.deleteCount(); got != 1 {
+		t.Fatalf("expected one delete call, got %d", got)
+	}
+	if got := len(snapshot.ManagedRecords); got != 0 {
+		t.Fatalf("expected empty persisted managed snapshot, got %d records", got)
+	}
+	if visible := output.visibleSnapshot(); len(visible) != 0 {
+		t.Fatalf("expected delete to remove visible record, got %+v", visible)
+	}
+
+	cancel()
+	assertRunStops(t, done)
+}
+
+func TestAppRunStartupRetainsSameKeyVisibleRecordStateWithoutProvenanceProof(t *testing.T) {
+	t.Parallel()
+
+	provider := contracts.ProviderRef{Type: "adguard", Name: "primary"}
+	sourceRef := contracts.SourceObjectRef{Provider: contracts.ProviderRef{Type: "docker", Name: "local"}, ID: "ctr-1", DisplayName: "svc"}
+	statePath := filepath.Join(t.TempDir(), "state.json")
+
+	store, err := state.NewStore(statePath)
+	if err != nil {
+		t.Fatalf("create state store: %v", err)
+	}
+	if err := store.Save(state.Snapshot{ManagedRecords: []state.ManagedRecord{{
+		Output:   provider,
+		Source:   sourceRef,
+		Hostname: "old.local",
+		Answer:   "10.0.0.12",
+	}}}); err != nil {
+		t.Fatalf("seed state store: %v", err)
+	}
+
+	output := &startupOutputStub{
+		provider: provider,
+		visible: []contracts.VisibleRecord{{
+			Output:   provider,
+			Hostname: "OLD.local",
+			Answer:   "10.0.0.12",
+		}},
+	}
+	app := New(testRuntimeConfig(statePath))
+	app.registry = testRegistry(
+		stubSourceFactory{source: &startupSourceStub{provider: sourceRef.Provider}},
+		stubOutputFactory{output: output},
+	)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- app.Run(ctx)
+	}()
+
+	waitForCondition(t, func() bool {
+		snapshot, err := store.Load()
+		return err == nil && len(snapshot.ManagedRecords) == 1
+	})
+
+	if got := output.deleteCount(); got != 0 {
+		t.Fatalf("expected no delete calls without provenance proof, got %d", got)
+	}
+	snapshot, err := store.Load()
+	if err != nil {
+		t.Fatalf("load persisted snapshot: %v", err)
+	}
+	if got := len(snapshot.ManagedRecords); got != 1 {
+		t.Fatalf("expected stale owned state to be retained, got %d managed records", got)
+	}
+	if snapshot.ManagedRecords[0].Hostname != "old.local" || snapshot.ManagedRecords[0].Answer != "10.0.0.12" {
+		t.Fatalf("expected retained stale owned record to stay unchanged, got %+v", snapshot.ManagedRecords[0])
+	}
+	if visible := output.visibleSnapshot(); len(visible) != 1 {
+		t.Fatalf("expected visible record to remain untouched, got %+v", visible)
+	}
+
+	cancel()
+	assertRunStops(t, done)
+}
+
+func TestAppReconcileOnceRetainsStaleOwnedStateWithoutDeletingSameKeyVisibleRecord(t *testing.T) {
+	t.Parallel()
+
+	provider := contracts.ProviderRef{Type: "adguard", Name: "primary"}
+	sourceRef := contracts.SourceObjectRef{Provider: contracts.ProviderRef{Type: "docker", Name: "local"}, ID: "ctr-1", DisplayName: "svc"}
+	statePath := filepath.Join(t.TempDir(), "state.json")
+
+	store, err := state.NewStore(statePath)
+	if err != nil {
+		t.Fatalf("create state store: %v", err)
+	}
+	if err := store.Save(state.Snapshot{ManagedRecords: []state.ManagedRecord{{
+		Output:   provider,
+		Source:   sourceRef,
+		Hostname: "old.local",
+		Answer:   "10.0.0.12",
+	}}}); err != nil {
+		t.Fatalf("seed state store: %v", err)
+	}
+
+	output := &startupOutputStub{
+		provider: provider,
+		visible: []contracts.VisibleRecord{
+			{Output: provider, Hostname: "OLD.local", Answer: "10.0.0.12"},
+			{Output: provider, Hostname: "manual.local", Answer: "10.0.0.50"},
+		},
+	}
+	app := New(testRuntimeConfig(statePath))
+	app.store = store
+	setTestProviders(app, testRuntimeDeps(RetryPolicy{}, 0), []contracts.Source{&startupSourceStub{provider: sourceRef.Provider}}, []contracts.Output{output})
+
+	if err := app.reconcileOnce(context.Background()); err != nil {
+		t.Fatalf("reconcile once: %v", err)
+	}
+	if got := output.deleteCount(); got != 0 {
+		t.Fatalf("expected no delete calls without unique ownership proof, got %d", got)
+	}
+
+	snapshot, err := store.Load()
+	if err != nil {
+		t.Fatalf("load persisted snapshot: %v", err)
+	}
+	if got := len(snapshot.ManagedRecords); got != 1 {
+		t.Fatalf("expected stale owned state to be retained, got %d managed records", got)
+	}
+	if snapshot.ManagedRecords[0].Hostname != "old.local" || snapshot.ManagedRecords[0].Answer != "10.0.0.12" {
+		t.Fatalf("expected retained stale owned record to stay unchanged, got %+v", snapshot.ManagedRecords[0])
+	}
+	if visible := output.visibleSnapshot(); len(visible) != 2 {
+		t.Fatalf("expected visible records to remain untouched, got %+v", visible)
+	}
+}
+
+func TestAppReconcileOnceDoesNotDeleteOrPersistAcrossAmbiguousVisibleDuplicates(t *testing.T) {
+	t.Parallel()
+
+	provider := contracts.ProviderRef{Type: "adguard", Name: "primary"}
+	sourceRef := contracts.SourceObjectRef{Provider: contracts.ProviderRef{Type: "docker", Name: "local"}, ID: "ctr-1", DisplayName: "svc"}
+	statePath := filepath.Join(t.TempDir(), "state.json")
+
+	store, err := state.NewStore(statePath)
+	if err != nil {
+		t.Fatalf("create state store: %v", err)
+	}
+	seed := state.Snapshot{ManagedRecords: []state.ManagedRecord{{
+		Output:   provider,
+		Source:   sourceRef,
+		Hostname: "old.local",
+		Answer:   "10.0.0.12",
+	}}}
+	if err := store.Save(seed); err != nil {
+		t.Fatalf("seed state store: %v", err)
+	}
+
+	output := &startupOutputStub{
+		provider: provider,
+		visible: []contracts.VisibleRecord{
+			{Output: provider, Hostname: "old.local", Answer: "10.0.0.12"},
+			{Output: provider, Hostname: "OLD.local", Answer: "10.0.0.12"},
+			{Output: provider, Hostname: "manual.local", Answer: "10.0.0.50"},
+		},
+	}
+	app := New(testRuntimeConfig(statePath))
+	app.store = store
+	setTestProviders(app, testRuntimeDeps(RetryPolicy{}, 0), []contracts.Source{&startupSourceStub{provider: sourceRef.Provider}}, []contracts.Output{output})
+
+	err = app.reconcileOnce(context.Background())
+	if err == nil {
+		t.Fatal("expected ambiguity error")
+	}
+	var ambiguityErr *ErrVisibleRecordAmbiguous
+	if !errors.As(err, &ambiguityErr) {
+		t.Fatalf("expected ErrVisibleRecordAmbiguous, got %T", err)
+	}
+	if got := output.deleteCount(); got != 0 {
+		t.Fatalf("expected duplicate visible handling to remain non-destructive, got %d deletes", got)
+	}
+
+	snapshot, loadErr := store.Load()
+	if loadErr != nil {
+		t.Fatalf("load persisted snapshot: %v", loadErr)
+	}
+	if len(snapshot.ManagedRecords) != len(seed.ManagedRecords) || snapshot.ManagedRecords[0] != seed.ManagedRecords[0] {
+		t.Fatalf("expected persisted state to remain unchanged on ambiguity, got %+v", snapshot.ManagedRecords)
+	}
 }
 
 func TestAppRunExecutesStartupReconcileBeforeCancellation(t *testing.T) {
@@ -546,7 +1148,8 @@ func TestAppRunRetriesStartupHandoffReconcileAfterTransientSourceFailure(t *test
 	app.registry = testRegistry(stubSourceFactory{source: source}, stubOutputFactory{output: output})
 	app.newDeps = func(config.Config) (RuntimeDeps, error) {
 		return RuntimeDeps{
-			Logger: slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelInfo})),
+			Logger:           slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelInfo})),
+			OperationTimeout: defaultOperationTimeout,
 			Retry: RetryPolicy{
 				InitialInterval: time.Millisecond,
 				MaxInterval:     2 * time.Millisecond,
@@ -603,7 +1206,8 @@ func TestAppRunRetriesWatchTriggeredReconcileAfterOtherSourceFailure(t *testing.
 	}
 	output := &startupOutputStub{provider: contracts.ProviderRef{Type: "adguard", Name: "primary"}}
 	deps := RuntimeDeps{
-		Logger: slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelInfo})),
+		Logger:           slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelInfo})),
+		OperationTimeout: defaultOperationTimeout,
 		Retry: RetryPolicy{
 			InitialInterval: time.Millisecond,
 			MaxInterval:     2 * time.Millisecond,
@@ -615,8 +1219,7 @@ func TestAppRunRetriesWatchTriggeredReconcileAfterOtherSourceFailure(t *testing.
 	app := New(testRuntimeConfig(statePath))
 	app.deps = deps
 	app.store = store
-	app.sources = []contracts.Source{watchSource, otherSource}
-	app.outputs = wrapOutputs([]contracts.Output{output}, deps)
+	setTestProviders(app, deps, []contracts.Source{watchSource, otherSource}, []contracts.Output{output})
 
 	if err := app.reconcile(context.Background(), "startup"); err != nil {
 		t.Fatalf("startup reconcile: %v", err)
@@ -809,7 +1412,8 @@ func TestAppRunRestartsWatchBeforeReconnectRepairRetries(t *testing.T) {
 	app.registry = testRegistry(stubSourceFactory{source: source}, stubOutputFactory{output: output})
 	app.newDeps = func(config.Config) (RuntimeDeps, error) {
 		return RuntimeDeps{
-			Logger: slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelInfo})),
+			Logger:           slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelInfo})),
+			OperationTimeout: defaultOperationTimeout,
 			Retry: RetryPolicy{
 				InitialInterval: 10 * time.Millisecond,
 				MaxInterval:     10 * time.Millisecond,
@@ -860,7 +1464,8 @@ func TestAppRunBacksOffRepeatedWatchReconnects(t *testing.T) {
 	app.registry = testRegistry(stubSourceFactory{source: source}, stubOutputFactory{output: output})
 	app.newDeps = func(config.Config) (RuntimeDeps, error) {
 		return RuntimeDeps{
-			Logger: slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelInfo})),
+			Logger:           slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelInfo})),
+			OperationTimeout: defaultOperationTimeout,
 			Retry: RetryPolicy{
 				InitialInterval: 10 * time.Millisecond,
 				MaxInterval:     20 * time.Millisecond,
@@ -870,7 +1475,8 @@ func TestAppRunBacksOffRepeatedWatchReconnects(t *testing.T) {
 	}
 	app.newDeps = func(config.Config) (RuntimeDeps, error) {
 		return RuntimeDeps{
-			Logger: slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelInfo})),
+			Logger:           slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelInfo})),
+			OperationTimeout: defaultOperationTimeout,
 			Retry: RetryPolicy{
 				InitialInterval: 25 * time.Millisecond,
 				MaxInterval:     50 * time.Millisecond,
@@ -935,11 +1541,12 @@ func TestAppRunReconnectBackoffDoesNotBlockOtherWatchHints(t *testing.T) {
 	}
 	output := &startupOutputStub{provider: contracts.ProviderRef{Type: "adguard", Name: "primary"}}
 	deps := RuntimeDeps{
-		Logger: slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelInfo})),
+		Logger:           slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelInfo})),
+		OperationTimeout: defaultOperationTimeout,
 		Retry: RetryPolicy{
-			InitialInterval: 50 * time.Millisecond,
-			MaxInterval:     50 * time.Millisecond,
-			MaxElapsedTime:  200 * time.Millisecond,
+			InitialInterval: 100 * time.Millisecond,
+			MaxInterval:     100 * time.Millisecond,
+			MaxElapsedTime:  300 * time.Millisecond,
 		},
 		WatchHintDebounce: shortWatchHintDebounce,
 	}
@@ -951,8 +1558,7 @@ func TestAppRunReconnectBackoffDoesNotBlockOtherWatchHints(t *testing.T) {
 		t.Fatalf("create store: %v", err)
 	}
 	app.store = store
-	app.sources = []contracts.Source{firstSource, secondSource}
-	app.outputs = wrapOutputs([]contracts.Output{output}, deps)
+	setTestProviders(app, deps, []contracts.Source{firstSource, secondSource}, []contracts.Output{output})
 
 	if err := app.reconcile(context.Background(), "startup"); err != nil {
 		t.Fatalf("startup reconcile: %v", err)
@@ -969,14 +1575,14 @@ func TestAppRunReconnectBackoffDoesNotBlockOtherWatchHints(t *testing.T) {
 	firstSession.errs <- io.EOF
 	peerSession.hints <- struct{}{}
 
-	waitForConditionWithin(t, 30*time.Millisecond, func() bool {
+	waitForConditionWithin(t, 80*time.Millisecond, func() bool {
 		return firstSource.listDesiredCallCount() >= 3 && secondSource.listDesiredCallCount() >= 3 && output.listVisibleCount() >= 3
 	})
 	if firstSource.watchCallCount() != 1 {
 		t.Fatalf("expected reconnect backoff to defer first source restart, got %d watch calls", firstSource.watchCallCount())
 	}
 
-	waitForConditionWithin(t, 120*time.Millisecond, func() bool {
+	waitForConditionWithin(t, 220*time.Millisecond, func() bool {
 		return firstSource.watchCallCount() >= 2
 	})
 	assertRunStillRunning(t, done)
@@ -1016,7 +1622,8 @@ func TestAppRunResetsReconnectBackoffAfterSuccessfulRepair(t *testing.T) {
 	app.registry = testRegistry(stubSourceFactory{source: source}, stubOutputFactory{output: output})
 	app.newDeps = func(config.Config) (RuntimeDeps, error) {
 		return RuntimeDeps{
-			Logger: slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelInfo})),
+			Logger:           slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelInfo})),
+			OperationTimeout: defaultOperationTimeout,
 			Retry: RetryPolicy{
 				InitialInterval: 25 * time.Millisecond,
 				MaxInterval:     50 * time.Millisecond,
@@ -1086,7 +1693,8 @@ func TestReconcileRetriesFullPassAfterTransientListVisibleFailure(t *testing.T) 
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	deps := RuntimeDeps{
-		Logger: logger,
+		Logger:           logger,
+		OperationTimeout: defaultOperationTimeout,
 		Retry: RetryPolicy{
 			InitialInterval: time.Millisecond,
 			MaxInterval:     time.Millisecond,
@@ -1103,8 +1711,7 @@ func TestReconcileRetriesFullPassAfterTransientListVisibleFailure(t *testing.T) 
 	app := New(testRuntimeConfig(statePath))
 	app.deps = deps
 	app.store = store
-	app.sources = []contracts.Source{source}
-	app.outputs = wrapOutputs([]contracts.Output{output}, deps)
+	setTestProviders(app, deps, []contracts.Source{source}, []contracts.Output{output})
 
 	if err := app.reconcile(context.Background(), "startup"); err != nil {
 		t.Fatalf("reconcile returned error: %v", err)
@@ -1171,7 +1778,8 @@ func TestReconcileRetriesFullPassAfterTransientListDesiredFailure(t *testing.T) 
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	deps := RuntimeDeps{
-		Logger: logger,
+		Logger:           logger,
+		OperationTimeout: defaultOperationTimeout,
 		Retry: RetryPolicy{
 			InitialInterval: time.Millisecond,
 			MaxInterval:     time.Millisecond,
@@ -1182,8 +1790,7 @@ func TestReconcileRetriesFullPassAfterTransientListDesiredFailure(t *testing.T) 
 	app := New(testRuntimeConfig(statePath))
 	app.deps = deps
 	app.store = store
-	app.sources = []contracts.Source{source}
-	app.outputs = wrapOutputs([]contracts.Output{output}, deps)
+	setTestProviders(app, deps, []contracts.Source{source}, []contracts.Output{output})
 
 	if err := app.reconcile(context.Background(), "startup"); err != nil {
 		t.Fatalf("reconcile returned error: %v", err)
@@ -1228,7 +1835,8 @@ func TestReconcileRetriesFullPassAfterTransientCreateFailure(t *testing.T) {
 	}
 
 	deps := RuntimeDeps{
-		Logger: slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelInfo})),
+		Logger:           slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelInfo})),
+		OperationTimeout: defaultOperationTimeout,
 		Retry: RetryPolicy{
 			InitialInterval: time.Millisecond,
 			MaxInterval:     time.Millisecond,
@@ -1255,12 +1863,12 @@ func TestReconcileRetriesFullPassAfterTransientCreateFailure(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	app := New(testRuntimeConfig(statePath))
 	app.deps = RuntimeDeps{
-		Logger: logger,
-		Retry:  deps.Retry,
+		Logger:           logger,
+		OperationTimeout: defaultOperationTimeout,
+		Retry:            deps.Retry,
 	}
 	app.store = store
-	app.sources = []contracts.Source{source}
-	app.outputs = wrapOutputs([]contracts.Output{output}, app.deps)
+	setTestProviders(app, app.deps, []contracts.Source{source}, []contracts.Output{output})
 
 	err = app.reconcile(context.Background(), "startup")
 	if err != nil {
@@ -1340,6 +1948,82 @@ func TestReconcileRetriesFullPassAfterTransientCreateFailure(t *testing.T) {
 	}
 }
 
+func TestReconcileRetriesFullPassAfterTransientCloudflareCreateFailure(t *testing.T) {
+	t.Parallel()
+
+	statePath := filepath.Join(t.TempDir(), "state.json")
+	store, err := state.NewStore(statePath)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	provider := contracts.ProviderRef{Type: "docker", Name: "local"}
+	source := &startupSourceStub{
+		provider: provider,
+		desired: []contracts.DesiredRecord{{
+			Hostname: "app.local",
+			Answer:   "10.0.0.10",
+			Source:   contracts.SourceObjectRef{Provider: provider, ID: "ctr-1", DisplayName: "svc"},
+			Output:   "cloudflare",
+		}},
+	}
+	output := &transientOutputStub{
+		provider:            contracts.ProviderRef{Type: "cloudflare", Name: "primary"},
+		failCreate:          1,
+		failCreateTemporary: true,
+		failWithMessage:     "cloudflare unavailable",
+	}
+
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	app := New(testRuntimeConfig(statePath))
+	app.deps = RuntimeDeps{
+		Logger:           logger,
+		OperationTimeout: defaultOperationTimeout,
+		Retry: RetryPolicy{
+			InitialInterval: time.Millisecond,
+			MaxInterval:     time.Millisecond,
+			MaxElapsedTime:  3 * time.Millisecond,
+		},
+	}
+	app.store = store
+	setTestProviders(app, app.deps, []contracts.Source{source}, []contracts.Output{output})
+
+	if err := app.reconcile(context.Background(), "startup"); err != nil {
+		t.Fatalf("reconcile returned error: %v", err)
+	}
+	if source.listDesiredCallCount() != 2 {
+		t.Fatalf("expected 2 ListDesired calls, got %d", source.listDesiredCallCount())
+	}
+	if output.createCount() != 2 {
+		t.Fatalf("expected 2 Create calls, got %d", output.createCount())
+	}
+	if output.listVisibleCount() != 2 {
+		t.Fatalf("expected 2 ListVisible calls, got %d", output.listVisibleCount())
+	}
+
+	snapshot, err := store.Load()
+	if err != nil {
+		t.Fatalf("load snapshot: %v", err)
+	}
+	if len(snapshot.ManagedRecords) != 1 {
+		t.Fatalf("expected one persisted managed record, got %d", len(snapshot.ManagedRecords))
+	}
+	if got := snapshot.ManagedRecords[0]; got.Output != output.Provider() || got.Hostname != "app.local" || got.Answer != "10.0.0.10" {
+		t.Fatalf("unexpected persisted record after retry: %+v", got)
+	}
+	if visible := output.visibleSnapshot(); len(visible) != 1 || visible[0].Output != output.Provider() || visible[0].Hostname != "app.local" {
+		t.Fatalf("unexpected visible records after retry: %+v", visible)
+	}
+
+	logs := buf.String()
+	for _, want := range []string{"retrying full reconcile after temporary output write failure", "output=cloudflare/primary", "reason=startup", "attempt=1", "cloudflare unavailable", "persisted state snapshot"} {
+		if !strings.Contains(logs, want) {
+			t.Fatalf("expected log output to contain %q, got %s", want, logs)
+		}
+	}
+}
+
 func TestReconcileReturnsTerminalMutationErrorWithoutRetryOrPersistingState(t *testing.T) {
 	t.Parallel()
 
@@ -1350,7 +2034,8 @@ func TestReconcileReturnsTerminalMutationErrorWithoutRetryOrPersistingState(t *t
 	}
 
 	deps := RuntimeDeps{
-		Logger: slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelInfo})),
+		Logger:           slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelInfo})),
+		OperationTimeout: defaultOperationTimeout,
 		Retry: RetryPolicy{
 			InitialInterval: time.Millisecond,
 			MaxInterval:     time.Millisecond,
@@ -1375,8 +2060,7 @@ func TestReconcileReturnsTerminalMutationErrorWithoutRetryOrPersistingState(t *t
 	app := New(testRuntimeConfig(statePath))
 	app.deps = deps
 	app.store = store
-	app.sources = []contracts.Source{source}
-	app.outputs = wrapOutputs([]contracts.Output{output}, deps)
+	setTestProviders(app, deps, []contracts.Source{source}, []contracts.Output{output})
 
 	err = app.reconcile(context.Background(), "startup")
 	if err == nil {
@@ -1410,6 +2094,30 @@ type startupSourceStub struct {
 	failListDesired      int
 	failWithMessage      string
 	mu                   sync.Mutex
+}
+
+type deadlineObservingSourceStub struct {
+	provider            contracts.ProviderRef
+	listDesiredDeadline time.Time
+	mu                  sync.Mutex
+}
+
+func (s *deadlineObservingSourceStub) Provider() contracts.ProviderRef {
+	return s.provider
+}
+
+func (s *deadlineObservingSourceStub) ListDesired(ctx context.Context) ([]contracts.DesiredRecord, error) {
+	deadline, _ := ctx.Deadline()
+	s.mu.Lock()
+	s.listDesiredDeadline = deadline
+	s.mu.Unlock()
+	return nil, nil
+}
+
+func (s *deadlineObservingSourceStub) observedDeadline() time.Time {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.listDesiredDeadline
 }
 
 func (s *startupSourceStub) Provider() contracts.ProviderRef {
@@ -1449,8 +2157,307 @@ type startupOutputStub struct {
 	visible          []contracts.VisibleRecord
 	created          []contracts.DesiredRecord
 	updated          []reconcileUpdateCall
+	deleted          []contracts.VisibleRecord
+	onDelete         func()
 	listVisibleCalls int
 	mu               sync.Mutex
+}
+
+type deadlineObservingOutputStub struct {
+	provider            contracts.ProviderRef
+	listVisibleDeadline time.Time
+	mu                  sync.Mutex
+}
+
+type blockingOutputOperation string
+
+const (
+	blockingOutputListVisible blockingOutputOperation = "list_visible"
+	blockingOutputCreate      blockingOutputOperation = "create"
+	blockingOutputUpdate      blockingOutputOperation = "update"
+	blockingOutputDelete      blockingOutputOperation = "delete"
+)
+
+type blockingSourceStub struct {
+	provider            contracts.ProviderRef
+	listDesiredCalls    int
+	listDesiredDeadline time.Time
+	mu                  sync.Mutex
+}
+
+type blockingOutputStub struct {
+	provider       contracts.ProviderRef
+	visible        []contracts.VisibleRecord
+	blockOperation blockingOutputOperation
+	deadlines      map[blockingOutputOperation]time.Time
+	listCalls      int
+	createCalls    int
+	updateCalls    int
+	deleteCalls    int
+	mu             sync.Mutex
+}
+
+type errorSourceStub struct {
+	provider         contracts.ProviderRef
+	err              error
+	listDesiredCalls int
+	mu               sync.Mutex
+}
+
+type errorOutputStub struct {
+	provider    contracts.ProviderRef
+	visible     []contracts.VisibleRecord
+	listErr     error
+	createErr   error
+	updateErr   error
+	deleteErr   error
+	listCalls   int
+	createCalls int
+	updateCalls int
+	deleteCalls int
+	mu          sync.Mutex
+}
+
+func (s *blockingSourceStub) Provider() contracts.ProviderRef {
+	return s.provider
+}
+
+func (s *blockingSourceStub) ListDesired(ctx context.Context) ([]contracts.DesiredRecord, error) {
+	deadline, _ := ctx.Deadline()
+	s.mu.Lock()
+	s.listDesiredCalls++
+	s.listDesiredDeadline = deadline
+	s.mu.Unlock()
+	<-ctx.Done()
+	return nil, deadlineExceededFailure(ctx.Err())
+}
+
+func (s *blockingSourceStub) observedDeadline() time.Time {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.listDesiredDeadline
+}
+
+func (s *blockingSourceStub) listDesiredCallCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.listDesiredCalls
+}
+
+func (s *errorSourceStub) Provider() contracts.ProviderRef {
+	return s.provider
+}
+
+func (s *errorSourceStub) ListDesired(context.Context) ([]contracts.DesiredRecord, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.listDesiredCalls++
+	return nil, s.err
+}
+
+func (s *errorSourceStub) listDesiredCallCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.listDesiredCalls
+}
+
+func (o *blockingOutputStub) Provider() contracts.ProviderRef {
+	return o.provider
+}
+
+func (o *blockingOutputStub) ListVisible(ctx context.Context) ([]contracts.VisibleRecord, error) {
+	o.mu.Lock()
+	o.listCalls++
+	o.recordDeadlineLocked(blockingOutputListVisible, ctx)
+	shouldBlock := o.blockOperation == blockingOutputListVisible
+	visible := append([]contracts.VisibleRecord(nil), o.visible...)
+	o.mu.Unlock()
+	if shouldBlock {
+		<-ctx.Done()
+		return nil, deadlineExceededFailure(ctx.Err())
+	}
+	return visible, nil
+}
+
+func (o *blockingOutputStub) Create(ctx context.Context, desired contracts.DesiredRecord) (*contracts.RecordProvenance, error) {
+	o.mu.Lock()
+	o.createCalls++
+	o.recordDeadlineLocked(blockingOutputCreate, ctx)
+	shouldBlock := o.blockOperation == blockingOutputCreate
+	o.mu.Unlock()
+	if shouldBlock {
+		<-ctx.Done()
+		return nil, deadlineExceededFailure(ctx.Err())
+	}
+	o.mu.Lock()
+	o.visible = append(o.visible, contracts.VisibleRecord{Output: o.provider, Hostname: desired.Hostname, Answer: desired.Answer})
+	o.mu.Unlock()
+	return nil, nil
+}
+
+func (o *blockingOutputStub) Update(ctx context.Context, visible contracts.VisibleRecord, desired contracts.DesiredRecord) (*contracts.RecordProvenance, error) {
+	o.mu.Lock()
+	o.updateCalls++
+	o.recordDeadlineLocked(blockingOutputUpdate, ctx)
+	shouldBlock := o.blockOperation == blockingOutputUpdate
+	o.mu.Unlock()
+	if shouldBlock {
+		<-ctx.Done()
+		return nil, deadlineExceededFailure(ctx.Err())
+	}
+	o.mu.Lock()
+	for i, current := range o.visible {
+		if visibleRecordKey(current.Hostname, current.Answer) != visibleRecordKey(visible.Hostname, visible.Answer) {
+			continue
+		}
+		o.visible[i] = contracts.VisibleRecord{Output: o.provider, Hostname: desired.Hostname, Answer: desired.Answer}
+		break
+	}
+	o.mu.Unlock()
+	return nil, nil
+}
+
+func (o *blockingOutputStub) Delete(ctx context.Context, visible contracts.VisibleRecord) error {
+	o.mu.Lock()
+	o.deleteCalls++
+	o.recordDeadlineLocked(blockingOutputDelete, ctx)
+	shouldBlock := o.blockOperation == blockingOutputDelete
+	o.mu.Unlock()
+	if shouldBlock {
+		<-ctx.Done()
+		return deadlineExceededFailure(ctx.Err())
+	}
+	o.mu.Lock()
+	for i, current := range o.visible {
+		if visibleRecordKey(current.Hostname, current.Answer) != visibleRecordKey(visible.Hostname, visible.Answer) {
+			continue
+		}
+		o.visible = append(o.visible[:i], o.visible[i+1:]...)
+		break
+	}
+	o.mu.Unlock()
+	return nil
+}
+
+func (o *blockingOutputStub) recordDeadlineLocked(operation blockingOutputOperation, ctx context.Context) {
+	if o.deadlines == nil {
+		o.deadlines = make(map[blockingOutputOperation]time.Time)
+	}
+	deadline, _ := ctx.Deadline()
+	o.deadlines[operation] = deadline
+}
+
+func (o *blockingOutputStub) observedDeadline(operation blockingOutputOperation) time.Time {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.deadlines[operation]
+}
+
+func (o *blockingOutputStub) listVisibleCount() int {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.listCalls
+}
+
+func (o *blockingOutputStub) createCount() int {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.createCalls
+}
+
+func (o *blockingOutputStub) updateCount() int {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.updateCalls
+}
+
+func (o *blockingOutputStub) deleteCount() int {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.deleteCalls
+}
+
+func (o *errorOutputStub) Provider() contracts.ProviderRef {
+	return o.provider
+}
+
+func (o *errorOutputStub) ListVisible(context.Context) ([]contracts.VisibleRecord, error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.listCalls++
+	if o.listErr != nil {
+		return nil, o.listErr
+	}
+	return append([]contracts.VisibleRecord(nil), o.visible...), nil
+}
+
+func (o *errorOutputStub) Create(context.Context, contracts.DesiredRecord) (*contracts.RecordProvenance, error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.createCalls++
+	return nil, o.createErr
+}
+
+func (o *errorOutputStub) Update(context.Context, contracts.VisibleRecord, contracts.DesiredRecord) (*contracts.RecordProvenance, error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.updateCalls++
+	return nil, o.updateErr
+}
+
+func (o *errorOutputStub) Delete(context.Context, contracts.VisibleRecord) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.deleteCalls++
+	return o.deleteErr
+}
+
+func (o *errorOutputStub) listVisibleCount() int {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.listCalls
+}
+
+func (o *errorOutputStub) createCount() int {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.createCalls
+}
+
+func (o *errorOutputStub) deleteCount() int {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.deleteCalls
+}
+
+func (o *deadlineObservingOutputStub) Provider() contracts.ProviderRef {
+	return o.provider
+}
+
+func (o *deadlineObservingOutputStub) ListVisible(ctx context.Context) ([]contracts.VisibleRecord, error) {
+	deadline, _ := ctx.Deadline()
+	o.mu.Lock()
+	o.listVisibleDeadline = deadline
+	o.mu.Unlock()
+	return nil, nil
+}
+
+func (o *deadlineObservingOutputStub) Create(context.Context, contracts.DesiredRecord) (*contracts.RecordProvenance, error) {
+	return nil, nil
+}
+
+func (o *deadlineObservingOutputStub) Update(context.Context, contracts.VisibleRecord, contracts.DesiredRecord) (*contracts.RecordProvenance, error) {
+	return nil, nil
+}
+
+func (o *deadlineObservingOutputStub) Delete(context.Context, contracts.VisibleRecord) error {
+	return nil
+}
+
+func (o *deadlineObservingOutputStub) observedDeadline() time.Time {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.listVisibleDeadline
 }
 
 func (o *startupOutputStub) Provider() contracts.ProviderRef {
@@ -1464,15 +2471,15 @@ func (o *startupOutputStub) ListVisible(context.Context) ([]contracts.VisibleRec
 	return append([]contracts.VisibleRecord(nil), o.visible...), nil
 }
 
-func (o *startupOutputStub) Create(_ context.Context, desired contracts.DesiredRecord) error {
+func (o *startupOutputStub) Create(_ context.Context, desired contracts.DesiredRecord) (*contracts.RecordProvenance, error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.created = append(o.created, desired)
 	o.visible = append(o.visible, contracts.VisibleRecord{Output: o.provider, Hostname: desired.Hostname, Answer: desired.Answer})
-	return nil
+	return nil, nil
 }
 
-func (o *startupOutputStub) Update(_ context.Context, visible contracts.VisibleRecord, desired contracts.DesiredRecord) error {
+func (o *startupOutputStub) Update(_ context.Context, visible contracts.VisibleRecord, desired contracts.DesiredRecord) (*contracts.RecordProvenance, error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.updated = append(o.updated, reconcileUpdateCall{From: visible, To: desired})
@@ -1481,13 +2488,27 @@ func (o *startupOutputStub) Update(_ context.Context, visible contracts.VisibleR
 			continue
 		}
 		o.visible[i] = contracts.VisibleRecord{Output: o.provider, Hostname: desired.Hostname, Answer: desired.Answer}
-		return nil
+		return nil, nil
 	}
 	o.visible = append(o.visible, contracts.VisibleRecord{Output: o.provider, Hostname: desired.Hostname, Answer: desired.Answer})
-	return nil
+	return nil, nil
 }
 
-func (o *startupOutputStub) Delete(context.Context, contracts.VisibleRecord) error {
+func (o *startupOutputStub) Delete(_ context.Context, visible contracts.VisibleRecord) error {
+	o.mu.Lock()
+	o.deleted = append(o.deleted, visible)
+	for i, current := range o.visible {
+		if visibleRecordKey(current.Hostname, current.Answer) != visibleRecordKey(visible.Hostname, visible.Answer) {
+			continue
+		}
+		o.visible = append(o.visible[:i], o.visible[i+1:]...)
+		break
+	}
+	hook := o.onDelete
+	o.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
 	return nil
 }
 
@@ -1507,6 +2528,18 @@ func (o *startupOutputStub) updateCount() int {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	return len(o.updated)
+}
+
+func (o *startupOutputStub) deleteCount() int {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return len(o.deleted)
+}
+
+func (o *startupOutputStub) visibleSnapshot() []contracts.VisibleRecord {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return append([]contracts.VisibleRecord(nil), o.visible...)
 }
 
 type watchSession struct {
@@ -1580,7 +2613,7 @@ func (o *transientOutputStub) ListVisible(context.Context) ([]contracts.VisibleR
 	return append([]contracts.VisibleRecord(nil), o.visible...), nil
 }
 
-func (o *transientOutputStub) Create(_ context.Context, desired contracts.DesiredRecord) error {
+func (o *transientOutputStub) Create(_ context.Context, desired contracts.DesiredRecord) (*contracts.RecordProvenance, error) {
 	o.mu.Lock()
 	o.createCalls++
 	shouldFail := o.createCalls > o.failCreateAfter && o.createCalls <= o.failCreateAfter+o.failCreate
@@ -1594,17 +2627,17 @@ func (o *transientOutputStub) Create(_ context.Context, desired contracts.Desire
 		if msg == "" {
 			msg = "transient create failure"
 		}
-		return stubFailure(msg, o.failCreateTemporary)
+		return nil, stubFailure(msg, o.failCreateTemporary)
 	}
 
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.visible = append(o.visible, contracts.VisibleRecord{Output: o.provider, Hostname: desired.Hostname, Answer: desired.Answer})
-	return nil
+	return nil, nil
 }
 
-func (o *transientOutputStub) Update(context.Context, contracts.VisibleRecord, contracts.DesiredRecord) error {
-	return nil
+func (o *transientOutputStub) Update(context.Context, contracts.VisibleRecord, contracts.DesiredRecord) (*contracts.RecordProvenance, error) {
+	return nil, nil
 }
 
 func (o *transientOutputStub) Delete(context.Context, contracts.VisibleRecord) error {
@@ -1689,8 +2722,78 @@ func testRuntimeConfig(statePath string) config.Config {
 func testRuntimeDeps(retry RetryPolicy, watchHintDebounce time.Duration) RuntimeDeps {
 	return RuntimeDeps{
 		Logger:            slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelInfo})),
+		OperationTimeout:  defaultOperationTimeout,
 		Retry:             retry,
 		WatchHintDebounce: watchHintDebounce,
+	}
+}
+
+func setTestProviders(app *App, deps RuntimeDeps, sources []contracts.Source, outputs []contracts.Output) {
+	app.deps = deps
+	app.setProviders(sources, outputs, deps)
+}
+
+func runReconcileWithin(t *testing.T, app *App, timeout, assertionWindow time.Duration) (time.Time, time.Time, error) {
+	t.Helper()
+
+	startedAt := time.Now()
+	done := make(chan error, 1)
+	go func() {
+		done <- app.reconcile(context.Background(), "startup")
+	}()
+
+	select {
+	case err := <-done:
+		finishedAt := time.Now()
+		if elapsed := finishedAt.Sub(startedAt); elapsed > assertionWindow {
+			t.Fatalf("expected reconcile to return within %v for operation timeout %v, got %v", assertionWindow, timeout, elapsed)
+		}
+		return startedAt, finishedAt, err
+	case <-time.After(assertionWindow):
+		t.Fatalf("reconcile did not return within buffered assertion window %v for operation timeout %v", assertionWindow, timeout)
+		return time.Time{}, time.Time{}, nil
+	}
+}
+
+func assertTimeoutError(t *testing.T, err error) {
+	t.Helper()
+
+	if err == nil {
+		t.Fatal("expected reconcile timeout error")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected context deadline exceeded, got %v", err)
+	}
+}
+
+type deadlineExceededStubError struct{}
+
+func (deadlineExceededStubError) Error() string {
+	return fmt.Sprintf("operation timed out: %v", context.DeadlineExceeded)
+}
+
+func (deadlineExceededStubError) Is(target error) bool {
+	return target == context.DeadlineExceeded
+}
+
+func deadlineExceededFailure(err error) error {
+	if err == nil {
+		return errors.New("operation ended without deadline error")
+	}
+	return deadlineExceededStubError{}
+}
+
+func assertObservedDeadline(t *testing.T, deadline, startedAt, finishedAt time.Time, timeout time.Duration) {
+	t.Helper()
+
+	if deadline.IsZero() {
+		t.Fatal("expected wrapped operation context to include a deadline")
+	}
+	if !deadline.After(startedAt) {
+		t.Fatalf("expected deadline after operation start, got start=%v deadline=%v", startedAt, deadline)
+	}
+	if deadline.After(finishedAt.Add(timeout + 20*time.Millisecond)) {
+		t.Fatalf("expected deadline near operation timeout, got finish=%v deadline=%v timeout=%v", finishedAt, deadline, timeout)
 	}
 }
 

@@ -5,6 +5,7 @@ type Config struct {
 	Outputs []OutputConfig `toml:"outputs"`
 	State   StateConfig    `toml:"state"`
 	Logging LoggingConfig  `toml:"logging"`
+	Runtime RuntimeConfig  `toml:"runtime"`
 	Retry   RetryConfig    `toml:"retry"`
 }
 
@@ -40,6 +41,10 @@ type StateConfig struct {
 type LoggingConfig struct {
 	Level  string `toml:"level"`
 	Format string `toml:"format"`
+}
+
+type RuntimeConfig struct {
+	OperationTimeout string `toml:"operation_timeout"`
 }
 
 type RetryConfig struct {

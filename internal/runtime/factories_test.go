@@ -185,12 +185,12 @@ func (fakeOutput) ListVisible(context.Context) ([]contracts.VisibleRecord, error
 	return nil, nil
 }
 
-func (fakeOutput) Create(context.Context, contracts.DesiredRecord) error {
-	return nil
+func (fakeOutput) Create(context.Context, contracts.DesiredRecord) (*contracts.RecordProvenance, error) {
+	return nil, nil
 }
 
-func (fakeOutput) Update(context.Context, contracts.VisibleRecord, contracts.DesiredRecord) error {
-	return nil
+func (fakeOutput) Update(context.Context, contracts.VisibleRecord, contracts.DesiredRecord) (*contracts.RecordProvenance, error) {
+	return nil, nil
 }
 
 func (fakeOutput) Delete(context.Context, contracts.VisibleRecord) error {

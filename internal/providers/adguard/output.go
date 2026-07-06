@@ -57,17 +57,25 @@ func (p *Provider) ListVisible(ctx context.Context) ([]contracts.VisibleRecord, 
 	return visible, nil
 }
 
-func (p *Provider) Create(ctx context.Context, desired contracts.DesiredRecord) error {
+func (p *Provider) Create(ctx context.Context, desired contracts.DesiredRecord) (*contracts.RecordProvenance, error) {
 	payload := rewriteItem{Domain: desired.Hostname, Answer: desired.Answer}
-	return p.requestJSON(ctx, http.MethodPost, "/control/rewrite/add", payload, nil)
+	if err := p.requestJSON(ctx, http.MethodPost, "/control/rewrite/add", payload, nil); err != nil {
+		return nil, err
+	}
+
+	return nil, nil
 }
 
-func (p *Provider) Update(ctx context.Context, visible contracts.VisibleRecord, desired contracts.DesiredRecord) error {
+func (p *Provider) Update(ctx context.Context, visible contracts.VisibleRecord, desired contracts.DesiredRecord) (*contracts.RecordProvenance, error) {
 	payload := rewriteUpdateRequest{
 		Target: rewriteItem{Domain: visible.Hostname, Answer: visible.Answer},
 		Update: rewriteItem{Domain: desired.Hostname, Answer: desired.Answer},
 	}
-	return p.requestJSON(ctx, http.MethodPut, "/control/rewrite/update", payload, nil)
+	if err := p.requestJSON(ctx, http.MethodPut, "/control/rewrite/update", payload, nil); err != nil {
+		return nil, err
+	}
+
+	return nil, nil
 }
 
 func (p *Provider) Delete(ctx context.Context, visible contracts.VisibleRecord) error {

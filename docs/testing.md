@@ -36,6 +36,7 @@ What `mise run live-test` covers:
 - managed rewrite create/update/restore
 - manual-record safety
 - restart recovery
+- stale-delete verification is currently skipped in the default live harness because AdGuard visible rewrites do not expose proof-bearing provenance
 
 Cleanup behavior:
 
@@ -48,7 +49,11 @@ Secret and log hygiene:
 - keep credentials in env references or fixture defaults; do not paste real credentials inline
 - do not echo secret env values, enable shell tracing, or dump compose logs by default
 
-Coverage note: stale-owned remote rewrite deletion is intentionally not asserted here until `.weave/plans/stale-owned-remote-cleanup.md` lands.
+Coverage note:
+
+- The live stale-delete assertion remains gated on the same ownership-proof requirement as runtime reconcile planning: one matching visible record plus non-empty provenance that uniquely identifies the daemon-owned record.
+- The default AdGuard live stack does not satisfy that requirement because its visible rewrite API does not expose stable unique provenance.
+- As a result, the current `mise run live-test` harness always logs the stale-delete check as intentionally skipped and leaves same-key cases non-destructive unless the harness is extended with a proof-bearing provider.
 
 ## Test fixtures
 

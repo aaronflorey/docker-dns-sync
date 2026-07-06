@@ -25,6 +25,10 @@ path = "/var/lib/docker-dns-sync/state.json"
 level = "info"
 format = "json"
 
+[runtime]
+# Optional per-operation timeout for external API calls and similar work.
+operation_timeout = "10s"
+
 [retry]
 initial_interval = "1s"
 max_interval = "30s"

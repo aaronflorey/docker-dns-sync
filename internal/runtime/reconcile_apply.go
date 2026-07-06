@@ -27,33 +27,49 @@ func applyReconcilePlan(ctx context.Context, output contracts.Output, owned stat
 		delete(recordsByLineage, managedRecordLineageKey(drop))
 	}
 
+	for _, keep := range plan.NextManaged {
+		keep.LastAppliedAt = now
+		lineage := managedRecordLineageKey(keep)
+		recordsByLineage[lineage] = keep
+		if drop, ok := plan.KeepDrops[lineage]; ok {
+			delete(recordsByLineage, managedRecordLineageKey(drop))
+		}
+	}
+
 	for _, create := range plan.Creates {
-		if err := output.Create(ctx, create); err != nil {
+		provenance, err := output.Create(ctx, create)
+		if err != nil {
 			return snapshotWithOutputRecords(otherRecords, recordsByLineage), progressed, fmt.Errorf("create %s: %w", visibleRecordKey(create.Hostname, create.Answer), err)
 		}
-		recordsByLineage[desiredRecordLineageKey(output.Provider(), create)] = state.ManagedRecord{Output: output.Provider(), Source: create.Source, Hostname: create.Hostname, Answer: create.Answer, LastAppliedAt: now}
+		lineage := desiredRecordLineageKey(output.Provider(), create)
+		recordsByLineage[lineage] = state.ManagedRecord{Output: output.Provider(), Source: create.Source, Hostname: create.Hostname, Answer: create.Answer, Provenance: copyRecordProvenance(provenance), LastAppliedAt: now}
+		if drop, ok := plan.CreateDrops[lineage]; ok {
+			delete(recordsByLineage, managedRecordLineageKey(drop))
+		}
 		progressed = true
 	}
 
 	for _, update := range plan.Updates {
-		if err := output.Update(ctx, update.From, update.To); err != nil {
+		provenance, err := output.Update(ctx, update.From, update.To)
+		if err != nil {
 			return snapshotWithOutputRecords(otherRecords, recordsByLineage), progressed, fmt.Errorf("update %s: %w", visibleRecordKey(update.From.Hostname, update.From.Answer), err)
 		}
-		recordsByLineage[desiredRecordLineageKey(output.Provider(), update.To)] = state.ManagedRecord{Output: output.Provider(), Source: update.To.Source, Hostname: update.To.Hostname, Answer: update.To.Answer, LastAppliedAt: now}
+		lineage := desiredRecordLineageKey(output.Provider(), update.To)
+		recordsByLineage[lineage] = state.ManagedRecord{Output: output.Provider(), Source: update.To.Source, Hostname: update.To.Hostname, Answer: update.To.Answer, Provenance: nextManagedProvenance(provenance, update.From.Provenance), LastAppliedAt: now}
+		if drop, ok := plan.UpdateDrops[lineage]; ok {
+			delete(recordsByLineage, managedRecordLineageKey(drop))
+		}
 		progressed = true
 	}
 
 	for _, del := range plan.Deletes {
+		// Delete the visible output record before removing its managed lineage so
+		// persistence only forgets ownership after the external mutation succeeds.
 		if err := output.Delete(ctx, del.Visible); err != nil {
 			return snapshotWithOutputRecords(otherRecords, recordsByLineage), progressed, fmt.Errorf("delete %s: %w", visibleRecordKey(del.Visible.Hostname, del.Visible.Answer), err)
 		}
 		delete(recordsByLineage, managedRecordLineageKey(del.Managed))
 		progressed = true
-	}
-
-	for _, keep := range plan.NextManaged {
-		keep.LastAppliedAt = now
-		recordsByLineage[managedRecordLineageKey(keep)] = keep
 	}
 
 	return snapshotWithOutputRecords(otherRecords, recordsByLineage), progressed, nil
@@ -82,4 +98,13 @@ func desiredRecordLineageKey(output contracts.ProviderRef, desired contracts.Des
 
 func managedRecordLineageKey(record state.ManagedRecord) string {
 	return ownedLineageKey(record.Output.Type, record.Output.Name, record.Source.Provider.Type, record.Source.Provider.Name, record.Source.ID, record.Hostname)
+}
+
+func copyRecordProvenance(provenance *contracts.RecordProvenance) *contracts.RecordProvenance {
+	if provenance == nil {
+		return nil
+	}
+
+	copy := *provenance
+	return &copy
 }

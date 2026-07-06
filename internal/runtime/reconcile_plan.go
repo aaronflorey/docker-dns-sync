@@ -12,6 +12,9 @@ type reconcilePlan struct {
 	Updates      []reconcileUpdateCall
 	Deletes      []reconcileDeleteCall
 	Drops        []state.ManagedRecord
+	CreateDrops  map[string]state.ManagedRecord
+	UpdateDrops  map[string]state.ManagedRecord
+	KeepDrops    map[string]state.ManagedRecord
 	Ambiguities  []*ErrVisibleRecordAmbiguous
 	NextManaged  []state.ManagedRecord
 	AppliedIndex map[string]state.ManagedRecord
@@ -23,7 +26,12 @@ type reconcileDeleteCall struct {
 }
 
 func buildReconcilePlan(output contracts.ProviderRef, desired []contracts.DesiredRecord, visible []contracts.VisibleRecord, owned state.Snapshot) reconcilePlan {
-	pl := reconcilePlan{AppliedIndex: make(map[string]state.ManagedRecord)}
+	pl := reconcilePlan{
+		AppliedIndex: make(map[string]state.ManagedRecord),
+		CreateDrops:  make(map[string]state.ManagedRecord),
+		UpdateDrops:  make(map[string]state.ManagedRecord),
+		KeepDrops:    make(map[string]state.ManagedRecord),
+	}
 
 	visibleByKey := make(map[string][]contracts.VisibleRecord)
 	visibleByHostname := make(map[string][]contracts.VisibleRecord)
@@ -66,6 +74,7 @@ func buildReconcilePlan(output contracts.ProviderRef, desired []contracts.Desire
 	matchedOwnedLineages := make(map[string]struct{}, len(ownedByLineage))
 
 	for lineage, d := range desiredByLineage {
+		matchedByHostnameOnly := false
 		ownedRecord, ok := ownedByLineage[lineage]
 		if !ok {
 			candidates := ownedByDisplayLineage[ownedDisplayLineageKey(output, d.Source, d.Hostname)]
@@ -79,38 +88,67 @@ func buildReconcilePlan(output contracts.ProviderRef, desired []contracts.Desire
 			if len(candidates) == 1 {
 				ownedRecord = candidates[0]
 				ok = true
+				matchedByHostnameOnly = true
 			}
 		}
 		if ok {
 			ownedLineage := managedRecordLineageKey(ownedRecord)
 			matchedOwnedLineages[ownedLineage] = struct{}{}
-			if ownedLineage != lineage {
-				pl.Drops = append(pl.Drops, ownedRecord)
-			}
 			hostnameMatches := visibleByHostname[normalizeHostname(d.Hostname)]
 			oldKey := visibleRecordKey(ownedRecord.Hostname, ownedRecord.Answer)
 			newKey := visibleRecordKey(d.Hostname, d.Answer)
 			if len(visibleByKey[oldKey]) == 1 && visibleRecordKey(d.Hostname, d.Answer) != oldKey {
-				pl.Updates = append(pl.Updates, reconcileUpdateCall{From: visibleByKey[oldKey][0], To: d})
+				if canUpdateOwnedVisibleRecord(ownedRecord, visibleByKey[oldKey][0], matchedByHostnameOnly) {
+					if ownedLineage != lineage {
+						pl.UpdateDrops[lineage] = ownedRecord
+					}
+					pl.Updates = append(pl.Updates, reconcileUpdateCall{From: visibleByKey[oldKey][0], To: d})
+					continue
+				}
 				continue
 			}
 			if len(visibleByKey[oldKey]) > 1 {
 				continue
 			}
 			if len(hostnameMatches) == 1 && newKey != visibleRecordKey(hostnameMatches[0].Hostname, hostnameMatches[0].Answer) {
-				pl.Updates = append(pl.Updates, reconcileUpdateCall{From: hostnameMatches[0], To: d})
+				if canUpdateOwnedVisibleRecord(ownedRecord, hostnameMatches[0], matchedByHostnameOnly) {
+					if ownedLineage != lineage {
+						pl.UpdateDrops[lineage] = ownedRecord
+					}
+					pl.Updates = append(pl.Updates, reconcileUpdateCall{From: hostnameMatches[0], To: d})
+					continue
+				}
 				continue
 			}
 			if len(visibleByKey[newKey]) == 0 {
+				if len(hostnameMatches) > 0 {
+					continue
+				}
+				if ownedLineage != lineage {
+					pl.CreateDrops[lineage] = ownedRecord
+				}
 				pl.Creates = append(pl.Creates, d)
 				continue
 			}
-			pl.NextManaged = append(pl.NextManaged, state.ManagedRecord{Output: output, Source: d.Source, Hostname: d.Hostname, Answer: d.Answer})
+			provenance := copyRecordProvenance(ownedRecord.Provenance)
+			if sameRecordProvenance(ownedRecord.Provenance, visibleByKey[newKey][0].Provenance) {
+				provenance = copyRecordProvenance(visibleByKey[newKey][0].Provenance)
+			}
+			if ownedLineage != lineage {
+				pl.KeepDrops[lineage] = ownedRecord
+			}
+			pl.NextManaged = append(pl.NextManaged, state.ManagedRecord{
+				Output:     output,
+				Source:     d.Source,
+				Hostname:   d.Hostname,
+				Answer:     d.Answer,
+				Provenance: provenance,
+			})
 			continue
 		}
 
 		key := visibleRecordKey(d.Hostname, d.Answer)
-		if len(visibleByKey[key]) == 0 {
+		if len(visibleByKey[key]) == 0 && len(visibleByHostname[normalizeHostname(d.Hostname)]) == 0 {
 			pl.Creates = append(pl.Creates, d)
 		}
 	}
@@ -120,6 +158,14 @@ func buildReconcilePlan(output contracts.ProviderRef, desired []contracts.Desire
 			continue
 		}
 		if _, keep := desiredByLineage[lineage]; keep {
+			continue
+		}
+		if visible, ok := staleOwnedDeleteVisibleRecord(m, visibleByKey); ok {
+			pl.Deletes = append(pl.Deletes, reconcileDeleteCall{Visible: visible, Managed: m})
+			continue
+		}
+		if shouldRetainManagedRecordWithoutProof(m, visibleByHostname) {
+			pl.NextManaged = append(pl.NextManaged, m)
 			continue
 		}
 		pl.Drops = append(pl.Drops, m)
@@ -136,4 +182,61 @@ func buildReconcilePlan(output contracts.ProviderRef, desired []contracts.Desire
 	})
 
 	return pl
+}
+
+func staleOwnedDeleteVisibleRecord(managed state.ManagedRecord, visibleByKey map[string][]contracts.VisibleRecord) (contracts.VisibleRecord, bool) {
+	key := visibleRecordKey(managed.Hostname, managed.Answer)
+	matches := visibleByKey[key]
+	if len(matches) != 1 {
+		return contracts.VisibleRecord{}, false
+	}
+	if !sameRecordProvenance(managed.Provenance, matches[0].Provenance) {
+		return contracts.VisibleRecord{}, false
+	}
+
+	return matches[0], true
+}
+
+func shouldRetainManagedRecordWithoutProof(managed state.ManagedRecord, visibleByHostname map[string][]contracts.VisibleRecord) bool {
+	return len(visibleByHostname[normalizeHostname(managed.Hostname)]) > 0
+}
+
+func canUpdateOwnedVisibleRecord(owned state.ManagedRecord, visible contracts.VisibleRecord, matchedByHostnameOnly bool) bool {
+	if hasRecordProvenance(visible.Provenance) {
+		return sameRecordProvenance(owned.Provenance, visible.Provenance)
+	}
+
+	if !matchedByHostnameOnly {
+		return true
+	}
+
+	return false
+}
+
+func hasRecordProvenance(provenance *contracts.RecordProvenance) bool {
+	return provenance != nil && provenance.RemoteID != ""
+}
+
+func sameRecordProvenance(managed, visible *contracts.RecordProvenance) bool {
+	if managed == nil || visible == nil {
+		return false
+	}
+	if managed.RemoteID == "" || visible.RemoteID == "" {
+		return false
+	}
+
+	return managed.RemoteID == visible.RemoteID
+}
+
+func nextManagedProvenance(primary, fallback *contracts.RecordProvenance) *contracts.RecordProvenance {
+	if primary != nil {
+		copy := *primary
+		return &copy
+	}
+	if fallback != nil {
+		copy := *fallback
+		return &copy
+	}
+
+	return nil
 }

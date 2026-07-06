@@ -31,6 +31,22 @@ type visibleRecordMeta struct {
 	id string
 }
 
+type temporaryError struct {
+	err error
+}
+
+func (e temporaryError) Error() string {
+	return e.err.Error()
+}
+
+func (e temporaryError) Unwrap() error {
+	return e.err
+}
+
+func (e temporaryError) Temporary() bool {
+	return true
+}
+
 func New(cfg config.OutputConfig) *Provider {
 	return &Provider{
 		ref:     contracts.ProviderRef{Type: cfg.Type, Name: cfg.Name},
@@ -70,6 +86,9 @@ func (p *Provider) ListVisible(ctx context.Context) ([]contracts.VisibleRecord, 
 			Output:   p.ref,
 			Hostname: hostname,
 			Answer:   answer,
+			Provenance: &contracts.RecordProvenance{
+				RemoteID: record.ID,
+			},
 		})
 		for _, key := range visibleRecordKeys(hostname, answer, zoneName) {
 			nextVisible[key] = visibleRecordMeta{id: record.ID}
@@ -77,7 +96,7 @@ func (p *Provider) ListVisible(ctx context.Context) ([]contracts.VisibleRecord, 
 	}
 
 	if err := iter.Err(); err != nil {
-		return nil, fmt.Errorf("list cloudflare dns records: %w", err)
+		return nil, wrapCloudflareTemporary(fmt.Errorf("list cloudflare dns records: %w", err))
 	}
 
 	p.mu.Lock()
@@ -87,54 +106,77 @@ func (p *Provider) ListVisible(ctx context.Context) ([]contracts.VisibleRecord, 
 	return visible, nil
 }
 
-func (p *Provider) Create(ctx context.Context, desired contracts.DesiredRecord) error {
+func (p *Provider) Create(ctx context.Context, desired contracts.DesiredRecord) (*contracts.RecordProvenance, error) {
 	body, err := buildRecordNewBody(desired.Hostname, desired.Answer)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	_, err = p.client.DNS.Records.New(ctx, dns.RecordNewParams{
+	created, err := p.client.DNS.Records.New(ctx, dns.RecordNewParams{
 		ZoneID: cloudflare.F(p.zoneID),
 		Body:   body,
 	})
 	if err != nil {
-		if isRecoverableDuplicateRecordError(err) {
-			visible, listErr := p.findVisibleHostname(ctx, desired.Hostname)
-			if listErr == nil {
-				if normalizeAnswer(visible.Answer) == normalizeAnswer(desired.Answer) {
-					return nil
-				}
-				if updateErr := p.Update(ctx, visible, desired); updateErr == nil {
-					return nil
-				}
+		createErr := wrapCloudflareTemporary(fmt.Errorf("create cloudflare dns record: %w", err))
+		if !isRecoverableDuplicateRecordError(err) {
+			return nil, createErr
+		}
+
+		visible, listErr := p.ListVisible(ctx)
+		if listErr != nil {
+			return nil, listErr
+		}
+
+		zoneName := ""
+		p.mu.RLock()
+		zoneName = p.zoneName
+		p.mu.RUnlock()
+
+		matches := make([]contracts.VisibleRecord, 0, 1)
+		for _, record := range visible {
+			if hostnamesEquivalent(record.Hostname, desired.Hostname, zoneName) {
+				matches = append(matches, record)
 			}
 		}
-		return fmt.Errorf("create cloudflare dns record: %w", err)
+		if len(matches) != 1 {
+			return nil, createErr
+		}
+
+		if normalizeAnswer(matches[0].Answer) == normalizeAnswer(desired.Answer) {
+			return copyProvenance(matches[0].Provenance), nil
+		}
+
+		updated, updateErr := p.Update(ctx, matches[0], desired)
+		if updateErr != nil {
+			return nil, updateErr
+		}
+
+		return updated, nil
 	}
 
-	return nil
+	return &contracts.RecordProvenance{RemoteID: created.ID}, nil
 }
 
-func (p *Provider) Update(ctx context.Context, visible contracts.VisibleRecord, desired contracts.DesiredRecord) error {
+func (p *Provider) Update(ctx context.Context, visible contracts.VisibleRecord, desired contracts.DesiredRecord) (*contracts.RecordProvenance, error) {
 	meta, ok := p.lookupVisibleRecord(visible.Hostname, visible.Answer)
 	if !ok {
-		return fmt.Errorf("cloudflare visible record %s is missing cached metadata", visibleRecordKey(visible.Hostname, visible.Answer))
+		return nil, fmt.Errorf("cloudflare visible record %s is missing cached metadata", visibleRecordKey(visible.Hostname, visible.Answer))
 	}
 
 	body, err := buildRecordUpdateBody(desired.Hostname, desired.Answer)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	_, err = p.client.DNS.Records.Update(ctx, meta.id, dns.RecordUpdateParams{
+	updated, err := p.client.DNS.Records.Update(ctx, meta.id, dns.RecordUpdateParams{
 		ZoneID: cloudflare.F(p.zoneID),
 		Body:   body,
 	})
 	if err != nil {
-		return fmt.Errorf("update cloudflare dns record: %w", err)
+		return nil, wrapCloudflareTemporary(fmt.Errorf("update cloudflare dns record: %w", err))
 	}
 
-	return nil
+	return &contracts.RecordProvenance{RemoteID: updated.ID}, nil
 }
 
 func (p *Provider) Delete(ctx context.Context, visible contracts.VisibleRecord) error {
@@ -145,7 +187,7 @@ func (p *Provider) Delete(ctx context.Context, visible contracts.VisibleRecord) 
 
 	_, err := p.client.DNS.Records.Delete(ctx, meta.id, dns.RecordDeleteParams{ZoneID: cloudflare.F(p.zoneID)})
 	if err != nil {
-		return fmt.Errorf("delete cloudflare dns record: %w", err)
+		return wrapCloudflareTemporary(fmt.Errorf("delete cloudflare dns record: %w", err))
 	}
 
 	return nil
@@ -170,7 +212,7 @@ func (p *Provider) ensureZoneName(ctx context.Context) (string, error) {
 
 	zone, err := p.client.Zones.Get(ctx, zones.ZoneGetParams{ZoneID: cloudflare.F(p.zoneID)})
 	if err != nil {
-		return "", fmt.Errorf("get cloudflare zone details: %w", err)
+		return "", wrapCloudflareTemporary(fmt.Errorf("get cloudflare zone details: %w", err))
 	}
 
 	zoneName := normalizeHostname(zone.Name)
@@ -181,41 +223,29 @@ func (p *Provider) ensureZoneName(ctx context.Context) (string, error) {
 	return zoneName, nil
 }
 
-func (p *Provider) findVisibleRecord(ctx context.Context, hostname, answer string) (visibleRecordMeta, error) {
-	if _, err := p.ListVisible(ctx); err != nil {
-		return visibleRecordMeta{}, err
+func wrapCloudflareTemporary(err error) error {
+	if !isTemporaryCloudflareError(err) {
+		return err
 	}
 
-	meta, ok := p.lookupVisibleRecord(hostname, answer)
-	if !ok {
-		return visibleRecordMeta{}, fmt.Errorf("cloudflare duplicate create recovery could not find %s", visibleRecordKey(hostname, answer))
-	}
-
-	return meta, nil
+	return temporaryError{err: err}
 }
 
-func (p *Provider) findVisibleHostname(ctx context.Context, hostname string) (contracts.VisibleRecord, error) {
-	visible, err := p.ListVisible(ctx)
-	if err != nil {
-		return contracts.VisibleRecord{}, err
+func isTemporaryCloudflareError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
 	}
 
-	zoneName := ""
-	p.mu.RLock()
-	zoneName = p.zoneName
-	p.mu.RUnlock()
-
-	matches := make([]contracts.VisibleRecord, 0, 1)
-	for _, record := range visible {
-		if hostnamesEquivalent(record.Hostname, hostname, zoneName) {
-			matches = append(matches, record)
-		}
-	}
-	if len(matches) != 1 {
-		return contracts.VisibleRecord{}, fmt.Errorf("cloudflare duplicate create recovery could not uniquely find hostname %s", normalizeHostname(hostname))
+	var apiErr *cloudflare.Error
+	if errors.As(err, &apiErr) {
+		return apiErr.StatusCode == 408 || apiErr.StatusCode == 429 || apiErr.StatusCode >= 500
 	}
 
-	return matches[0], nil
+	var netErr net.Error
+	return errors.As(err, &netErr) && netErr.Timeout()
 }
 
 func isRecoverableDuplicateRecordError(err error) bool {
@@ -418,4 +448,13 @@ func hostnamesEquivalent(left, right, zoneName string) bool {
 
 func visibleRecordKey(hostname, answer string) string {
 	return normalizeHostname(hostname) + "|" + normalizeAnswer(answer)
+}
+
+func copyProvenance(provenance *contracts.RecordProvenance) *contracts.RecordProvenance {
+	if provenance == nil {
+		return nil
+	}
+
+	copy := *provenance
+	return &copy
 }

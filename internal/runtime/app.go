@@ -62,8 +62,7 @@ func (a *App) Run(ctx context.Context) error {
 	a.cfg = resolved
 	a.deps = deps
 	a.store = store
-	a.sources = sources
-	a.outputs = wrapOutputs(outputs, deps)
+	a.setProviders(sources, outputs, deps)
 
 	deps.Logger.Info("starting docker-dns-sync runtime", "sources", len(sources), "outputs", len(outputs), "state_path", resolved.State.Path, "log_level", resolved.Logging.Level)
 	if err := a.reconcile(ctx, "startup"); err != nil {
@@ -247,11 +246,6 @@ func (e outputListError) Error() string {
 
 func (e outputListError) Unwrap() error {
 	return e.err
-}
-
-func isTemporaryError(err error) bool {
-	var temporaryErr temporaryError
-	return errors.As(err, &temporaryErr) && temporaryErr.Temporary()
 }
 
 func (a *App) runSteadyState(ctx context.Context) error {
@@ -445,12 +439,88 @@ type loggingOutput struct {
 	logger *slog.Logger
 }
 
+type timeoutSource struct {
+	base    contracts.Source
+	timeout time.Duration
+}
+
+type timeoutWatchableSource struct {
+	timeoutSource
+	watchable contracts.WatchableSource
+}
+
+type timeoutOutput struct {
+	base    contracts.Output
+	timeout time.Duration
+}
+
+func wrapSources(sources []contracts.Source, deps RuntimeDeps) []contracts.Source {
+	wrapped := make([]contracts.Source, 0, len(sources))
+	for _, source := range sources {
+		wrappedSource := timeoutSource{base: source, timeout: deps.OperationTimeout}
+		watchable, ok := source.(contracts.WatchableSource)
+		if ok {
+			wrapped = append(wrapped, timeoutWatchableSource{timeoutSource: wrappedSource, watchable: watchable})
+			continue
+		}
+		wrapped = append(wrapped, wrappedSource)
+	}
+	return wrapped
+}
+
 func wrapOutputs(outputs []contracts.Output, deps RuntimeDeps) []contracts.Output {
 	wrapped := make([]contracts.Output, 0, len(outputs))
 	for _, output := range outputs {
-		wrapped = append(wrapped, loggingOutput{base: output, logger: deps.Logger})
+		wrapped = append(wrapped, loggingOutput{base: timeoutOutput{base: output, timeout: deps.OperationTimeout}, logger: deps.Logger})
 	}
 	return wrapped
+}
+
+func (a *App) setProviders(sources []contracts.Source, outputs []contracts.Output, deps RuntimeDeps) {
+	a.sources = wrapSources(sources, deps)
+	a.outputs = wrapOutputs(outputs, deps)
+}
+
+func (s timeoutSource) Provider() contracts.ProviderRef {
+	return s.base.Provider()
+}
+
+func (s timeoutSource) ListDesired(ctx context.Context) ([]contracts.DesiredRecord, error) {
+	ctx, cancel := withOperationTimeout(ctx, s.timeout)
+	defer cancel()
+	return s.base.ListDesired(ctx)
+}
+
+func (s timeoutWatchableSource) Watch(ctx context.Context) contracts.SourceWatch {
+	return s.watchable.Watch(ctx)
+}
+
+func (o timeoutOutput) Provider() contracts.ProviderRef {
+	return o.base.Provider()
+}
+
+func (o timeoutOutput) ListVisible(ctx context.Context) ([]contracts.VisibleRecord, error) {
+	ctx, cancel := withOperationTimeout(ctx, o.timeout)
+	defer cancel()
+	return o.base.ListVisible(ctx)
+}
+
+func (o timeoutOutput) Create(ctx context.Context, desired contracts.DesiredRecord) (*contracts.RecordProvenance, error) {
+	ctx, cancel := withOperationTimeout(ctx, o.timeout)
+	defer cancel()
+	return o.base.Create(ctx, desired)
+}
+
+func (o timeoutOutput) Update(ctx context.Context, visible contracts.VisibleRecord, desired contracts.DesiredRecord) (*contracts.RecordProvenance, error) {
+	ctx, cancel := withOperationTimeout(ctx, o.timeout)
+	defer cancel()
+	return o.base.Update(ctx, visible, desired)
+}
+
+func (o timeoutOutput) Delete(ctx context.Context, visible contracts.VisibleRecord) error {
+	ctx, cancel := withOperationTimeout(ctx, o.timeout)
+	defer cancel()
+	return o.base.Delete(ctx, visible)
 }
 
 func (o loggingOutput) Provider() contracts.ProviderRef {
@@ -461,20 +531,20 @@ func (o loggingOutput) ListVisible(ctx context.Context) ([]contracts.VisibleReco
 	return o.base.ListVisible(ctx)
 }
 
-func (o loggingOutput) Create(ctx context.Context, desired contracts.DesiredRecord) error {
-	err := o.base.Create(ctx, desired)
+func (o loggingOutput) Create(ctx context.Context, desired contracts.DesiredRecord) (*contracts.RecordProvenance, error) {
+	provenance, err := o.base.Create(ctx, desired)
 	if err == nil {
 		o.logger.Info("output mutation applied", "operation", "create", "provider", providerKey(o.Provider()), "hostname", desired.Hostname)
 	}
-	return err
+	return provenance, err
 }
 
-func (o loggingOutput) Update(ctx context.Context, visible contracts.VisibleRecord, desired contracts.DesiredRecord) error {
-	err := o.base.Update(ctx, visible, desired)
+func (o loggingOutput) Update(ctx context.Context, visible contracts.VisibleRecord, desired contracts.DesiredRecord) (*contracts.RecordProvenance, error) {
+	provenance, err := o.base.Update(ctx, visible, desired)
 	if err == nil {
 		o.logger.Info("output mutation applied", "operation", "update", "provider", providerKey(o.Provider()), "hostname", desired.Hostname)
 	}
-	return err
+	return provenance, err
 }
 
 func (o loggingOutput) Delete(ctx context.Context, visible contracts.VisibleRecord) error {

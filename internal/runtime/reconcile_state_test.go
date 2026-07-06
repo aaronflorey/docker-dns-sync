@@ -159,6 +159,59 @@ func TestPersistedManagedRecords(t *testing.T) {
 			t.Fatalf("unexpected persisted partial progress: %+v", saved.ManagedRecords[0])
 		}
 	})
+
+	t.Run("retains old lineage when replacement create fails after earlier progress", func(t *testing.T) {
+		t.Parallel()
+
+		statePath := filepath.Join(t.TempDir(), "state.json")
+		store, err := state.NewStore(statePath)
+		if err != nil {
+			t.Fatalf("new store: %v", err)
+		}
+
+		seeded := state.Snapshot{ManagedRecords: []state.ManagedRecord{{
+			Output:   provider,
+			Source:   contracts.SourceObjectRef{Provider: source.Provider, ID: "ctr-old", DisplayName: "svc-old"},
+			Hostname: "app-2.local",
+			Answer:   "10.0.0.11",
+		}}}
+		if err := store.Save(seeded); err != nil {
+			t.Fatalf("seed store: %v", err)
+		}
+
+		current, err := store.Load()
+		if err != nil {
+			t.Fatalf("load current: %v", err)
+		}
+
+		fakeOutput := &reconcilePartialCreateOutput{provider: provider}
+		_, err = ReconcileAndPersist(context.Background(), store, ReconcileInput{
+			Output: fakeOutput,
+			Desired: []contracts.DesiredRecord{
+				{Hostname: "app-1.local", Answer: "10.0.0.10", Source: contracts.SourceObjectRef{Provider: source.Provider, ID: "ctr-1", DisplayName: "svc-1"}},
+				{Hostname: "app-2.local", Answer: "10.0.0.11", Source: contracts.SourceObjectRef{Provider: source.Provider, ID: "ctr-2", DisplayName: "svc-2"}},
+			},
+			Visible: nil,
+			Owned:   current,
+		})
+		if err == nil {
+			t.Fatal("expected apply error")
+		}
+
+		saved, err := store.Load()
+		if err != nil {
+			t.Fatalf("load saved: %v", err)
+		}
+		if len(saved.ManagedRecords) != 2 {
+			t.Fatalf("expected successful create plus retained old lineage after partial failure, got %d records", len(saved.ManagedRecords))
+		}
+		if saved.ManagedRecords[0].Hostname != "app-1.local" || saved.ManagedRecords[0].Source.ID != "ctr-1" {
+			t.Fatalf("expected first successful create to persist, got %+v", saved.ManagedRecords[0])
+		}
+		if saved.ManagedRecords[1].Hostname != "app-2.local" || saved.ManagedRecords[1].Source.ID != "ctr-old" || saved.ManagedRecords[1].Answer != "10.0.0.11" {
+			t.Fatalf("expected failed replacement to retain old lineage, got %+v", saved.ManagedRecords[1])
+		}
+	})
 }
 
 type reconcileFakeOutputFailCreate struct {
@@ -172,12 +225,12 @@ func (f *reconcileFakeOutputFailCreate) ListVisible(context.Context) ([]contract
 	return nil, nil
 }
 
-func (f *reconcileFakeOutputFailCreate) Create(context.Context, contracts.DesiredRecord) error {
-	return f.err
+func (f *reconcileFakeOutputFailCreate) Create(context.Context, contracts.DesiredRecord) (*contracts.RecordProvenance, error) {
+	return nil, f.err
 }
 
-func (f *reconcileFakeOutputFailCreate) Update(context.Context, contracts.VisibleRecord, contracts.DesiredRecord) error {
-	return nil
+func (f *reconcileFakeOutputFailCreate) Update(context.Context, contracts.VisibleRecord, contracts.DesiredRecord) (*contracts.RecordProvenance, error) {
+	return nil, nil
 }
 
 func (f *reconcileFakeOutputFailCreate) Delete(context.Context, contracts.VisibleRecord) error {
@@ -195,16 +248,16 @@ func (f *reconcilePartialCreateOutput) ListVisible(context.Context) ([]contracts
 	return nil, nil
 }
 
-func (f *reconcilePartialCreateOutput) Create(context.Context, contracts.DesiredRecord) error {
+func (f *reconcilePartialCreateOutput) Create(context.Context, contracts.DesiredRecord) (*contracts.RecordProvenance, error) {
 	f.createCalls++
 	if f.createCalls == 2 {
-		return errors.New("create failed")
+		return nil, errors.New("create failed")
 	}
-	return nil
+	return nil, nil
 }
 
-func (f *reconcilePartialCreateOutput) Update(context.Context, contracts.VisibleRecord, contracts.DesiredRecord) error {
-	return nil
+func (f *reconcilePartialCreateOutput) Update(context.Context, contracts.VisibleRecord, contracts.DesiredRecord) (*contracts.RecordProvenance, error) {
+	return nil, nil
 }
 
 func (f *reconcilePartialCreateOutput) Delete(context.Context, contracts.VisibleRecord) error {
