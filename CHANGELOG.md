@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.3.0](https://github.com/aaronflorey/docker-dns-sync/compare/v0.2.1...v0.3.0) (2026-07-19)
+
+
+### Features
+
+* **01-01:** implement config-driven startup and cancellable runtime ([e17220b](https://github.com/aaronflorey/docker-dns-sync/commit/e17220b17f0ea1a30db811adca5fd88b477547b3))
+* **01-02:** add config validation and secret resolution ([dbd1a3b](https://github.com/aaronflorey/docker-dns-sync/commit/dbd1a3b1b27ecf683b340fb08b59c21adce69f87))
+* **01-03:** add provider contracts and runtime factories ([a48260f](https://github.com/aaronflorey/docker-dns-sync/commit/a48260ffd494b0f05f3657d64991a990ebef4b16))
+* **01-04:** wire atomic state and runtime deps ([0e6d926](https://github.com/aaronflorey/docker-dns-sync/commit/0e6d926214b0112bc215788b69ebb6cb9e241e5a))
+* **02-01:** implement ownership-safe reconcile planner and apply flow ([ba43924](https://github.com/aaronflorey/docker-dns-sync/commit/ba43924da2d3f6e16af16eede69685bbde5ab49c))
+* **02-02:** implement real AdGuard output transport ([59e03f0](https://github.com/aaronflorey/docker-dns-sync/commit/59e03f0c529297b35744f76580a4ae9dcd108c62))
+* **03-04:** complete docker sync automation and runtime recovery ([7cb50d3](https://github.com/aaronflorey/docker-dns-sync/commit/7cb50d3a35b0f7a1b39075de489f6a665a7ef6d8))
+* add live Docker smoke test workflow ([79e5699](https://github.com/aaronflorey/docker-dns-sync/commit/79e5699861db0e0108619ed6ba039c4ebe7cd01b))
+* add provenance-gated stale cleanup and operation timeouts ([6e2dad6](https://github.com/aaronflorey/docker-dns-sync/commit/6e2dad67b69ad685bf522e4c62d4c481808be3df))
+* **config:** add source host ip support ([e52b4db](https://github.com/aaronflorey/docker-dns-sync/commit/e52b4db9808fd7b59d6a2592e52464bc007a2f3a))
+* debounce watch hints and add safe derivation diagnostics ([74c123a](https://github.com/aaronflorey/docker-dns-sync/commit/74c123aa692a1c21d78fc8c47056de0b98544331))
+* fix logging ([57653c4](https://github.com/aaronflorey/docker-dns-sync/commit/57653c41e712c0f6dfaf0eb4895cdd4a1c1e7264))
+
+
+### Bug Fixes
+
+* **02-01:** run startup reconciliation in runtime ([56a029d](https://github.com/aaronflorey/docker-dns-sync/commit/56a029d744718296b89a6bf2c8a0bb13a79b7030))
+* **05:** close milestone audit gaps ([969a122](https://github.com/aaronflorey/docker-dns-sync/commit/969a122c9366babd3ef2bd63a7970f4bf25089da))
+* **cloudflare:** recover duplicate create conflicts ([9a2bc9b](https://github.com/aaronflorey/docker-dns-sync/commit/9a2bc9b1b6917a0fe882f466c6d63da5ae48b818))
+* **cloudflare:** take over existing single-host records ([c11f292](https://github.com/aaronflorey/docker-dns-sync/commit/c11f2924b6996c6d263ed253c27d86246bc76e1e))
+* **config:** add docker base domain support ([9da24d0](https://github.com/aaronflorey/docker-dns-sync/commit/9da24d0f7646322f60c585de0236b1a5da3bfe71))
+* **docker:** add proxy.dns output targeting ([fa2787e](https://github.com/aaronflorey/docker-dns-sync/commit/fa2787edc897b04740268404879138b385998e95))
+* reject unknown config keys during load ([7dbe3b2](https://github.com/aaronflorey/docker-dns-sync/commit/7dbe3b21e7e118b626ad4df11ecf443ed4e8b9bd))
+* **release:** migrate goreleaser config ([f7e5292](https://github.com/aaronflorey/docker-dns-sync/commit/f7e5292d93dc770c71f73a93937ea855b5e8d51c))
+* resolve post-merge conflicts from wave 1 ([ab654d5](https://github.com/aaronflorey/docker-dns-sync/commit/ab654d5306b94a0ebcef6228ed942bdf2529c043))
+* **runtime:** add trace logging and fix cloudflare visible matching ([7b2b2e9](https://github.com/aaronflorey/docker-dns-sync/commit/7b2b2e945864cec2d601285504ee617feb8cda51))
+* **runtime:** recover owned same-host drift ([1cde591](https://github.com/aaronflorey/docker-dns-sync/commit/1cde5915853846ca0e6cf3746bcb7460026cc353))
+* **runtime:** retry transient source reads ([24d71f8](https://github.com/aaronflorey/docker-dns-sync/commit/24d71f8ae1da8a6d026f6910de83f389715be6db))
+* use remote provenance for Cloudflare record mutations ([778168e](https://github.com/aaronflorey/docker-dns-sync/commit/778168e4eb0c4c3125473b660e973d0af10fe17f))
+
 ## [0.2.1](https://github.com/aaronflorey/docker-dns-sync/compare/v0.2.0...v0.2.1) (2026-06-21)
 
 
